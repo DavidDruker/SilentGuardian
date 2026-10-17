@@ -1,0 +1,159 @@
+{
+  "scope": "Synthetic landmarks through the actual detector, persistence and dry-run notification worker. Not recorded video, physical capture latency, real provider delivery, or clinical validation.",
+  "results": [
+    {
+      "scenario": "fall",
+      "profile": "daniel",
+      "source": "synthetic landmarks",
+      "observed_seconds": 9,
+      "event_count": 1,
+      "rule_hits": [
+        "fall"
+      ],
+      "first_event_at_s": 2.667,
+      "fall_onset_to_queued_alert_s": 0.667,
+      "ingest_p95_ms": 10.68,
+      "notification_states": [
+        "simulated",
+        "pending"
+      ]
+    },
+    {
+      "scenario": "stumble",
+      "profile": "daniel",
+      "source": "synthetic landmarks",
+      "observed_seconds": 9,
+      "event_count": 1,
+      "rule_hits": [
+        "stumble"
+      ],
+      "first_event_at_s": 2.667,
+      "fall_onset_to_queued_alert_s": null,
+      "ingest_p95_ms": 9.72,
+      "notification_states": []
+    },
+    {
+      "scenario": "stumble",
+      "profile": "margaret",
+      "source": "synthetic landmarks",
+      "observed_seconds": 9,
+      "event_count": 1,
+      "rule_hits": [
+        "restricted_standing",
+        "stumble"
+      ],
+      "first_event_at_s": 0.0,
+      "fall_onset_to_queued_alert_s": null,
+      "ingest_p95_ms": 10.85,
+      "notification_states": [
+        "simulated",
+        "pending"
+      ]
+    },
+    {
+      "scenario": "normal",
+      "profile": "daniel",
+      "source": "synthetic landmarks",
+      "observed_seconds": 9,
+      "event_count": 0,
+      "rule_hits": [],
+      "first_event_at_s": null,
+      "fall_onset_to_queued_alert_s": null,
+      "ingest_p95_ms": 8.14,
+      "notification_states": []
+    },
+    {
+      "scenario": "restricted_standing",
+      "profile": "margaret",
+      "source": "synthetic landmarks",
+      "observed_seconds": 9,
+      "event_count": 1,
+      "rule_hits": [
+        "restricted_standing"
+      ],
+      "first_event_at_s": 0.0,
+      "fall_onset_to_queued_alert_s": null,
+      "ingest_p95_ms": 9.38,
+      "notification_states": [
+        "simulated",
+        "pending"
+      ]
+    },
+    {
+      "scenario": "restricted_standing",
+      "profile": "daniel",
+      "source": "synthetic landmarks",
+      "observed_seconds": 9,
+      "event_count": 0,
+      "rule_hits": [],
+      "first_event_at_s": null,
+      "fall_onset_to_queued_alert_s": null,
+      "ingest_p95_ms": 6.93,
+      "notification_states": []
+    },
+    {
+      "scenario": "assisted_standing",
+      "profile": "margaret",
+      "source": "synthetic landmarks",
+      "observed_seconds": 9,
+      "event_count": 0,
+      "rule_hits": [],
+      "first_event_at_s": null,
+      "fall_onset_to_queued_alert_s": null,
+      "ingest_p95_ms": 7.02,
+      "notification_states": []
+    },
+    {
+      "scenario": "sway",
+      "profile": "daniel",
+      "source": "synthetic landmarks",
+      "observed_seconds": 9,
+      "event_count": 1,
+      "rule_hits": [
+        "sway"
+      ],
+      "first_event_at_s": 7.0,
+      "fall_onset_to_queued_alert_s": null,
+      "ingest_p95_ms": 7.86,
+      "notification_states": []
+    },
+    {
+      "scenario": "bed_exit",
+      "profile": "margaret",
+      "source": "synthetic landmarks",
+      "observed_seconds": 9,
+      "event_count": 1,
+      "rule_hits": [
+        "bed_exit",
+        "restricted_standing"
+      ],
+      "first_event_at_s": 0.0,
+      "fall_onset_to_queued_alert_s": null,
+      "ingest_p95_ms": 8.2,
+      "notification_states": [
+        "simulated",
+        "pending"
+      ]
+    },
+    {
+      "scenario": "low_visibility",
+      "profile": "daniel",
+      "source": "synthetic landmarks",
+      "observed_seconds": 9,
+      "event_count": 0,
+      "rule_hits": [],
+      "first_event_at_s": null,
+      "fall_onset_to_queued_alert_s": null,
+      "ingest_p95_ms": 2.62,
+      "notification_states": []
+    }
+  ],
+  "normal_observation_seconds": 9,
+  "normal_false_alerts": 0,
+  "limitations": [
+    "No credentials supplied",
+    "No staged team recordings supplied",
+    "No reviewed personal baseline fitted",
+    "No live camera accuracy measurement"
+  ]
+}

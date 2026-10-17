@@ -1,0 +1,57 @@
+from uuid import uuid4
+
+from backend.app.replay import scenario_frames
+
+
+def auth(client):
+    assert client.post('/api/session',json={'token':'local-demo-only'}).status_code==200
+
+
+def test_auth_validation_and_origin(client):
+    assert client.get('/healthz').status_code==200
+    assert client.get('/api/profiles').status_code==401
+    assert client.post('/api/session',json={'token':'wrong'}).status_code==401
+    auth(client)
+    assert len(client.get('/api/profiles').json())==2
+    assert client.post('/api/frames',json={},headers={'origin':'https://evil.example'}).status_code==403
+    assert client.post('/api/frames',json={}).status_code==422
+
+
+def test_websocket_reconnect_and_identity_binding(client):
+    auth(client)
+    frames=list(scenario_frames('fall','daniel'))
+    with client.websocket_connect('/ws/pose',headers={'origin':'http://localhost:8000'}) as ws:
+        for frame in frames[:45]:
+            ws.send_json(frame.model_dump()); assert 'error' not in ws.receive_json()
+    with client.websocket_connect('/ws/pose',headers={'origin':'http://localhost:8000'}) as ws:
+        for frame in frames[40:80]:
+            ws.send_json(frame.model_dump()); result=ws.receive_json()
+        changed=frames[81].model_copy(update={'person_id':'margaret'})
+        ws.send_json(changed.model_dump());assert 'error' in ws.receive_json()
+    assert len(client.get('/api/events').json())==1
+
+
+def test_contact_link_scoped_and_ack_idempotent(client):
+    auth(client)
+    for frame in scenario_frames('fall','daniel'):
+        assert client.post('/api/frames',json=frame.model_dump()).status_code==200
+    ev=client.get('/api/events').json()[0]
+    link=client.get(f'/api/events/{ev["id"]}/contact-link/son').json()['url']
+    token=link.rsplit('/',1)[1]
+    headers={'authorization':f'Bearer {token}'}
+    client.delete('/api/session')
+    assert client.get('/api/profiles',headers=headers).status_code==401
+    view=client.get(f'/api/contact/{ev["id"]}/son',headers=headers)
+    assert view.status_code==200 and 'conditions' not in view.text and 'contacts' not in view.text
+    assert client.get(f'/api/contact/{ev["id"]}/neighbour',headers=headers).status_code==401
+    for _ in range(2):
+        assert client.post(f'/api/contact/{ev["id"]}/son/ack',headers=headers,json={'note':'On my way'}).status_code==200
+
+
+def test_demo_call_and_push_validation(client):
+    auth(client)
+    request=str(uuid4())
+    a=client.post(f'/api/demo/call/{request}').json()
+    b=client.post(f'/api/demo/call/{request}').json()
+    assert a==b
+    assert client.post('/api/push',json={'person_id':'daniel','contact_id':'son','endpoint':'http://127.0.0.1/private','keys':{'auth':'x','p256dh':'y'}}).status_code==422

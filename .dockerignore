@@ -1,0 +1,12 @@
+.git
+.venv
+.env
+data
+artifacts
+web/node_modules
+web/dist
+web/public/models
+web/public/wasm
+web/public/pose-worker.js
+**/__pycache__
+.pytest_cache
