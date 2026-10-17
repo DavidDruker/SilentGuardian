@@ -50,13 +50,13 @@ export function ContactView({ parts }: { parts: string[] }) {
         <img className="brand-logo" src="/brand/hayvn-lockup.png" alt="Hayvn" />
       </div>
       <section className="contact-card">
-        <span className="eyebrow">YOUR TRUSTED CIRCLE</span>
+        <span className="eyebrow">CHECK-IN REQUEST</span>
         {ev ? (
           <>
             <h1>
               {ev.status === "acknowledged"
-                ? "Someone is on it."
-                : `${ev.alias} could use a check-in.`}
+                ? "This signal has been acknowledged."
+                : `${ev.alias} may need a check-in.`}
             </h1>
             <span className={`pill urgency-${ev.urgency}`}>
               {urgencyNames[ev.urgency]} · Level {ev.urgency}
@@ -95,7 +95,7 @@ export function ContactView({ parts }: { parts: string[] }) {
             </small>
           </>
         ) : (
-          <h2>Opening your alert…</h2>
+          <h2>Loading this event…</h2>
         )}
         {error && (
           <p role="alert" className="error">
@@ -103,7 +103,7 @@ export function ContactView({ parts }: { parts: string[] }) {
           </p>
         )}
       </section>
-      <p className="muted">Demonstration only · Human support, always.</p>
+      <p className="muted">Demonstration only · A person decides what happens next.</p>
     </main>
   );
 }

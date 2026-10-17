@@ -188,7 +188,7 @@ export default function App() {
       worker.terminate();
       setCheckingPose(false);
       setError(
-        "Pose model check timed out. Rebuild the local assets and try again.",
+        "Pose model check timed out after 30 s. Rebuild the local assets and try again.",
       );
     }, 30000);
     worker.onmessage = (event) => {
@@ -234,22 +234,22 @@ export default function App() {
             alt="Hayvn"
           />
           <h1>
-            Here for the
+            See who needs
             <br />
-            moments that matter.
+            a check-in first.
           </h1>
           <p>
-            Quiet observation.
+            Hayvn notices possible changes from a person’s usual movement.
             <br />
-            Thoughtful check-ins.
+            A person reviews each signal and decides what happens next.
             <br />
-            People who care.
+            It supports care staff. It does not replace them or diagnose.
           </p>
-          <small>Care and Personal · One connected circle</small>
+          <small>Care mode for staff · Personal mode for people at home</small>
         </div>
         <section className="login-form">
-          <h2>A little peace of mind.</h2>
-          <p>Open your monitoring station.</p>
+          <h2>Sign in to review signals.</h2>
+          <p>Use the operator access token set for this deployment.</p>
           <form onSubmit={login}>
             <label>
               Operator access token
@@ -261,16 +261,16 @@ export default function App() {
                 placeholder="Enter your access token"
               />
             </label>
-            <button className="primary">Open station</button>
+            <button className="primary">Sign in</button>
           </form>
           {config?.demo_enabled && (
             <button className="secondary" onClick={demo}>
-              Explore the local demo
+              Open the local demo
             </button>
           )}
           <p className="muted">
-            Synthetic profiles. Skeleton-only processing.
-            <br />A demonstration of human support, not clinical care.
+            Seeded profiles are synthetic. The server receives body landmarks, not video.
+            <br />This is a demonstration, not a medical device.
           </p>
           {error && (
             <p role="alert" className="error">
@@ -340,11 +340,11 @@ export default function App() {
         </nav>
         <div className="sidebar-bottom">
           <div className="privacy-note">
-            <h4>Privacy comes first.</h4>
+            <h4>What this server receives</h4>
             <p>
-              Video stays on the device.
+              Body landmarks. Video stays on the capture device.
               <br />
-              Skeleton keyframes may go to Gemini with consent.
+              Gemini receives skeleton keyframes only with consent.
             </p>
           </div>
           <button
@@ -382,7 +382,7 @@ export default function App() {
             >
               <Bell size={19} />
             </button>
-            <div className="operator-avatar">SG</div>
+            <div className="operator-avatar">OP</div>
           </div>
         </header>
         <main className="workspace">
@@ -398,24 +398,24 @@ export default function App() {
               <h1>
                 {page === "overview"
                   ? mode === "care"
-                    ? "A little closer to everyone."
-                    : "Your day. A little more supported."
+                    ? "Changes from usual, for staff review."
+                    : "Changes from your usual day."
                   : page === "events"
-                    ? "Every moment, in context."
+                    ? "Each signal and what happened next."
                     : page === "circle"
-                      ? "People you can count on."
+                      ? "Who is told, and when."
                       : page === "trends"
-                        ? "A baseline, and a bigger picture."
+                        ? "Change from usual, day by day."
                         : page === "privacy"
-                          ? "You stay in control."
+                          ? "What is stored, and who agreed."
                           : page === "evidence"
-                            ? "Every claim needs evidence."
-                            : "Ready for the demonstration."}
+                            ? "What is tested, and what is not."
+                            : "Demo phone and connections."}
               </h1>
               <p>
                 {mode === "care"
-                  ? "Know when a moment needs your attention. Keep care personal."
-                  : "Go about your day, with your trusted circle within reach."}
+                  ? "Possible changes from a resident’s usual movement appear here. A person decides what happens next."
+                  : "Possible changes from your usual movement appear here. You choose who is told and when."}
               </p>
             </div>
             <button className="secondary" onClick={() => setEditing(true)}>
@@ -458,7 +458,7 @@ export default function App() {
               ·{" "}
               {config.gemini_configured
                 ? "Gemini configured"
-                : "Rule-based verdicts"}
+                : "Rule-based assessment"}
             </span>
             <span>DEMO</span>
           </div>
@@ -467,7 +467,7 @@ export default function App() {
               <div className="summary-grid">
                 <div className="summary-card">
                   <span>
-                    {mode === "care" ? "In your care" : "Your monitoring"}
+                    {mode === "care" ? "Residents" : "Capture"}
                   </span>
                   <strong>
                     {mode === "care"
@@ -476,19 +476,19 @@ export default function App() {
                         ? "Active"
                         : "Paused"}
                     <small>
-                      {mode === "care" ? "resident profile" : "camera status"}
+                      {mode === "care" ? "in Care mode" : "camera status"}
                     </small>
                   </strong>
                 </div>
                 <div className="summary-card">
-                  <span>Needs a check</span>
+                  <span>For review</span>
                   <strong>
                     {active.length}
                     <small>open event{active.length !== 1 ? "s" : ""}</small>
                   </strong>
                 </div>
                 <div className="summary-card">
-                  <span>People ready to help</span>
+                  <span>Contacts</span>
                   <strong>
                     {profile.contacts?.length || 0}
                     <small>
@@ -500,11 +500,11 @@ export default function App() {
               {checkIn && (
                 <div className="check-in">
                   <div>
-                    <span className="eyebrow">A QUICK CHECK-IN</span>
+                    <span className="eyebrow">CHECK-IN REQUEST</span>
                     <h2>Are you feeling okay, {profile.alias}?</h2>
                     <p>
-                      We noticed a brief change in movement. Your circle will be
-                      notified if you don’t respond.
+                      Hayvn noticed a possible change from your usual movement.
+                      If you do not respond, your circle is told.
                     </p>
                   </div>
                   <button
@@ -527,8 +527,8 @@ export default function App() {
                   <section className="panel recent-panel">
                     <div className="panel-heading">
                       <div>
-                        <span className="eyebrow">A SHARED PICTURE</span>
-                        <h2>Recent moments</h2>
+                        <span className="eyebrow">EVENT LOG</span>
+                        <h2>Recent events</h2>
                       </div>
                       <button
                         className="text-button"
@@ -548,7 +548,7 @@ export default function App() {
                     <div className="panel-heading">
                       <span className="eyebrow">
                         {mode === "care"
-                          ? "MONITORED RESIDENT"
+                          ? "RESIDENT"
                           : "YOUR PROFILE"}
                       </span>
                       <button
@@ -566,7 +566,7 @@ export default function App() {
                       {mode === "care" ? "Care mode" : "Personal mode"}
                     </p>
                     <select
-                      aria-label="Monitored profile"
+                      aria-label="Selected profile"
                       value={profile.id}
                       onChange={(e) => setPersonId(e.target.value)}
                     >
@@ -600,13 +600,13 @@ export default function App() {
                       <p>
                         <strong>
                           {profile.mobility_aid === "none"
-                            ? "Independent movement"
+                            ? "No mobility aid noted"
                             : `${pretty(profile.mobility_aid || "")} noted in profile`}
                         </strong>
                         <span>
                           {profile.restrict_night_standing
-                            ? "Assistance required during quiet hours"
-                            : "No standing restrictions"}
+                            ? "Standing without a helper in quiet hours is flagged"
+                            : "No quiet-hours standing rule"}
                         </span>
                       </p>
                       <p>
@@ -618,29 +618,29 @@ export default function App() {
                         <span>
                           {profile.check_in_first
                             ? `Level 1 response window: ${profile.check_in_seconds}s`
-                            : "Direct routing for concern events"}
+                            : "Signals go to contacts without a check-in"}
                         </span>
                       </p>
                     </div>
                   </section>
                   <section className="support-card">
-                    <h3>Support is a shared effort.</h3>
+                    <h3>Who is told first</h3>
                     <p>
-                      {profile.contacts?.[0]?.name || "Add a contact"} is first
+                      {profile.contacts?.[0]?.name || "Nobody"} is first
                       in the {mode === "care" ? "care team" : "trusted circle"}.
                     </p>
                     <button
                       className="text-button"
                       onClick={() => setPage("circle")}
                     >
-                      Meet the circle
+                      View the contact order
                     </button>
                   </section>
                   <div className="small-note">
                     <CircleHelp size={16} />
                     <span>
-                      Low visibility is shown as uncertain. It never means
-                      everything is okay.
+                      Low visibility is shown as uncertain. Uncertain does not
+                      mean the person is okay.
                     </span>
                   </div>
                 </aside>
@@ -699,7 +699,7 @@ export default function App() {
             <div className="setup-grid">
               <section className="panel">
                 <span className="eyebrow">DEMO PHONE</span>
-                <h2>A ring is all it takes.</h2>
+                <h2>Test the demo call.</h2>
                 <p>
                   Request a short call to the configured personal phone. If
                   answered, it hangs up without speaking.
@@ -732,13 +732,13 @@ export default function App() {
                       : "Ring demo phone"}
                 </button>
                 <p className="muted">
-                  One call per event. Five calls per day and a five-minute
-                  cooldown by default. SMS is outside the current scope.
+                  1 call per event. 5 calls per day and a 5 min cooldown by
+                  default. SMS is outside the current scope.
                 </p>
               </section>
               <section className="panel">
                 <span className="eyebrow">CONNECTIONS</span>
-                <h2>Built to connect.</h2>
+                <h2>Check each connection.</h2>
                 <button
                   className="secondary small"
                   onClick={checkPose}
@@ -801,8 +801,8 @@ export default function App() {
               <img className="footer-mark" src="/brand/hayvn-mark.png" alt="" />
               Hayvn
             </span>
-            <span>Staged, not clinical · Not a medical device</span>
-            <span>Made for people.</span>
+            <span>Demonstration build · Not a medical device</span>
+            <span>Supports care staff. Does not replace them.</span>
           </footer>
         </main>
       </div>
@@ -836,8 +836,8 @@ function EventList({
   if (!events.length)
     return (
       <div className="empty-events">
-        <h3>A quiet moment.</h3>
-        <p>No events yet. Start capture or play a labelled demo scenario.</p>
+        <h3>No events yet.</h3>
+        <p>Start the camera or replay a labelled demo scenario.</p>
       </div>
     );
   return (

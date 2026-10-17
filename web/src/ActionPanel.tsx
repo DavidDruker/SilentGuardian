@@ -55,7 +55,7 @@ export function ActionPanel({
   const result = canUsePolled && polled && (polled.observed_at ?? 0) > (direct?.observed_at ?? 0) ? polled : direct;
   const status =
     result?.status === "scored"
-      ? (live && (result.age_seconds ?? 0) > 2 ? `Last prediction · ${result.age_seconds?.toFixed(1)}s behind the latest pose` : "Prediction available")
+      ? (live && (result.age_seconds ?? 0) > 2 ? `Last model score · ${result.age_seconds?.toFixed(1)}s behind the latest pose` : "Model scores available")
       : result?.status === "inference_failed"
         ? "Inference failed; existing detection continues"
         : model?.state === "ready"
@@ -70,7 +70,7 @@ export function ActionPanel({
                 ? "Model status unavailable"
                 : live
                   ? "Loading model status"
-                  : "No model prediction recorded";
+                  : "No model score recorded";
   return (
     <section className="action-panel" aria-label="Learned action recognition">
       <div className="action-heading">
@@ -78,7 +78,7 @@ export function ActionPanel({
         <span className="pill">Shadow evaluation</span>
       </div>
       <p>
-        {status}. Predictions are recorded for comparison; they do not control
+        {status}. Model scores are recorded for comparison. They do not control
         alerts.
       </p>
       {result?.status === "scored" && (

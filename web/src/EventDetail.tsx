@@ -4,7 +4,7 @@ import { api, type GuardianEvent, type Landmark, type Profile } from "./api";
 import { Skeleton } from "./Skeleton";
 import { ActionPanel } from "./ActionPanel";
 
-export const urgencyNames = ["Info", "Watch", "Concern", "Urgent"];
+export const urgencyNames = ["Info", "Review", "Concern", "Urgent"];
 export const pretty = (s: string) => s.replaceAll("_", " ");
 export const timeLabel = (t: number) =>
   new Date(t * 1000).toLocaleTimeString([], {
@@ -89,7 +89,7 @@ export function EventDetail({
             <span className={`pill urgency-${event.urgency}`}>
               Level {event.urgency} · {urgencyNames[event.urgency]}
             </span>
-            <h2 id="event-title">A closer look at {event.alias}’s event.</h2>
+            <h2 id="event-title">{event.alias}’s event record.</h2>
             <p className="muted">
               {timeLabel(event.opened_at)} · Profile v{event.profile_version} ·{" "}
               {pretty(event.source)}
@@ -113,7 +113,7 @@ export function EventDetail({
         <div className="comparison-grid">
           <section>
             <span className="eyebrow">RULES ONLY</span>
-            <h3>Observed pattern + fixed floor</h3>
+            <h3>Observed pattern + minimum level</h3>
             <p>{event.rule_summary}</p>
             <strong>Minimum level {event.floor_urgency}</strong>
           </section>
@@ -137,12 +137,12 @@ export function EventDetail({
           <div className="floor-decision" role="status">
             <strong>{String(event.floor_decision.source)}</strong>
             <p>
-              Proposed level {String(event.floor_decision.proposed)} → safety
-              floor {String(event.floor_decision.floor)} → applied level{" "}
+              Proposed level {String(event.floor_decision.proposed)} → minimum
+              level {String(event.floor_decision.floor)} → applied level{" "}
               {String(event.floor_decision.applied)}.{" "}
               {event.floor_decision.blocked
                 ? "Downgrade blocked."
-                : "Floor respected."}
+                : "Minimum level kept."}
             </p>
           </div>
         )}
@@ -216,7 +216,7 @@ export function EventDetail({
               </span>
             </p>
             <p className="muted">
-              Safety floor: level {event.floor_urgency}.{" "}
+              Minimum level: {event.floor_urgency}.{" "}
               {event.verdict_status === "fallback"
                 ? "Gemini was unavailable or its response did not pass validation."
                 : ""}
@@ -232,8 +232,7 @@ export function EventDetail({
               <p key={i}>{s}</p>
             ))}
             <p className="muted">
-              An observed pattern calls for a human check. It is not a
-              diagnosis.
+              This signal is for staff review. It is not a diagnosis.
             </p>
           </section>
         </div>
@@ -289,7 +288,7 @@ export function EventDetail({
           <div className="acknowledged">
             Dismissed and logged for review. Future sends for this event
             stopped; continued long-lie evidence can open a new alert and raise
-            the floor.
+            the minimum level.
           </div>
         ) : event.status === "acknowledged" ? (
           <div className="acknowledged">

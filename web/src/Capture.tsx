@@ -366,8 +366,8 @@ export function Capture({
     <section className="panel capture-panel">
       <div className="panel-heading">
         <div>
-          <span className="eyebrow">PRIVATE BY DESIGN</span>
-          <h2>Movement, without the video.</h2>
+          <span className="eyebrow">CAPTURE</span>
+          <h2>Only body landmarks leave this device.</h2>
         </div>
         <span className={`pill ${running ? "green" : ""}`}>
           <Radio size={13} />
@@ -408,11 +408,11 @@ export function Capture({
             <div className="camera-icon">
               <Camera size={32} />
             </div>
-            <strong>Your space stays private</strong>
+            <strong>Camera off</strong>
             <span>
-              Start a camera or explore a demo scenario.
+              Start the camera or replay a demo scenario.
               <br />
-              Only body landmarks reach the server.
+              Video is processed on this device.
             </span>
           </div>
         )}
@@ -447,7 +447,7 @@ export function Capture({
               Monitor person {i + 1}
             </button>
           ))}
-          <span>Select again after occlusion or crossed paths.</span>
+          <span>Select again if the person is hidden or paths cross.</span>
         </div>
       )}
       <div className="capture-actions">
@@ -610,9 +610,9 @@ export function Capture({
         <summary>Personal calibration · median and MAD</summary>
         <p>
           Record separate sessions of ordinary movement, review them as normal,
-          then fit a posture-specific baseline. Three consecutive abnormal
-          windows can trigger only after held-out evaluation. Novel movement is
-          not necessarily unsafe.
+          then fit a posture-specific baseline. 3 consecutive windows that
+          differ from usual can open an event, but only after held-out
+          evaluation. A change from usual is not always unsafe.
         </p>
         <button className="secondary small" onClick={calibration}>
           {calibrating ? "Stop calibration" : "Record calibration"}
@@ -630,8 +630,8 @@ export function Capture({
             aria-modal="true"
             aria-labelledby="consent-title"
           >
-            <span className="eyebrow">BEFORE MONITORING</span>
-            <h2 id="consent-title">Your movement. Your choice.</h2>
+            <span className="eyebrow">CONSENT RECORD</span>
+            <h2 id="consent-title">Consent before capture.</h2>
             <p>
               Use synthetic data or consenting teammates only. Video stays on
               this device. Identifying skeleton landmarks and event keyframes
@@ -648,8 +648,8 @@ export function Capture({
                 checked={sendGemini}
                 onChange={(e) => setSendGemini(e.target.checked)}
               />
-              Allow category flags and skeleton-rendered keyframes to Gemini
-              (requires a confirmed billed project)
+              Allow sending category flags and skeleton-rendered keyframes to
+              Gemini (requires a confirmed billed project)
             </label>
             <label className="check-row">
               <input

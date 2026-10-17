@@ -58,17 +58,16 @@ export function BaselinePanel({ profile, onError }: Props) {
   };
   return (
     <section className="baseline-panel">
-      <h3>A baseline you can explain</h3>
+      <h3>How the baseline works</h3>
       <p>
-        Six torso-normalized movement features, compared within standing,
+        6 torso-normalized movement features, compared within standing,
         sitting and lying postures. Modified z-score = 0.6745 × (value − median)
         / MAD, with small resolution floors for zero MAD.
       </p>
       <p className="muted">
-        Calibration: six walking passes, eight sit-to-stands, five bends, one
-        minute standing, one minute on a bed, then turns and reaches. Include
-        ordinary fast sitting. Use two sessions and review the recording as
-        normal.
+        Calibration: 6 walking passes, 8 sit-to-stands, 5 bends, 1 min
+        standing, 1 min on a bed, then turns and reaches. Include ordinary fast
+        sitting. Use 2 sessions and review each recording as normal.
       </p>
       <p>
         <strong>{data?.calibration_windows ?? 0}</strong> calibration windows ·{" "}
@@ -190,8 +189,8 @@ export function PrivacyPanel({ profile, onError, onChange }: Props) {
   };
   return (
     <section className="panel privacy-panel">
-      <span className="eyebrow">YOUR CONTROL</span>
-      <h2>Pause. Review. Delete.</h2>
+      <span className="eyebrow">CONSENT AND STORAGE</span>
+      <h2>Change consent or delete data.</h2>
       <p>
         Video stays on the capture device. Skeleton landmarks are identifying
         movement data and are stored by this server. Category flags and
@@ -309,7 +308,7 @@ export function TrendsPanel({ profile, onError }: Props) {
     <>
       <section className="panel">
         <span className="eyebrow">FROZEN ANCHOR, CURRENT MOVEMENT</span>
-        <h2>Change stays visible.</h2>
+        <h2>Standing movement by day.</h2>
         <p>
           Daily means and standard deviations beside the original calibration
           median. A changing current baseline never rewrites the frozen anchor.
@@ -332,7 +331,7 @@ export function TrendsPanel({ profile, onError }: Props) {
             onChange={(e) => setSynthetic(e.target.value === "true")}
           >
             <option value="false">Observed eligible windows</option>
-            <option value="true">Synthetic six-day example</option>
+            <option value="true">Synthetic 6-day example</option>
           </select>
           <button className="secondary small" onClick={load}>
             Load synthetic drift example
@@ -467,7 +466,7 @@ export function EvidencePanel({ onError }: { onError: (s: string) => void }) {
   return (
     <section className="panel">
       <span className="eyebrow">MEASURED, WITH SCOPE</span>
-      <h2>Show what passed.</h2>
+      <h2>Synthetic test results.</h2>
       <p>
         These are generated skeleton fixtures through the actual detector, local
         persistence and dry-run alert queue. They are not recorded people,
@@ -535,11 +534,13 @@ export function EvidencePanel({ onError }: { onError: (s: string) => void }) {
       )}
       <h3>Evidence still required</h3>
       <p>
-        Two consenting people, two camera angles, independent tuning and test
-        clips, 20–30 minutes of ordinary movement, an uncertain/occluded case,
-        and real provider receipt. Tiger load latency, Vultr operation and prize
+        2 consenting people, 2 camera angles, independent tuning and test
+        clips, 20–30 min of ordinary movement, an uncertain/occluded case, and
+        real provider receipt. Tiger load latency, Vultr operation and prize
         eligibility remain unverified. No clinical accuracy, regional residency,
         SBAR handoff, phone-sensor integration or fork replay is claimed.
+        Real-world accuracy is expected to be lower than these synthetic
+        results.
       </p>
     </section>
   );

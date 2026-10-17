@@ -56,7 +56,7 @@ export function ProfileEditor({
         <header>
           <div>
             <span className="eyebrow">PROFILE VERSION {p.version}</span>
-            <h2 id="profile-title">Care that knows the person.</h2>
+            <h2 id="profile-title">Profile, rules and contacts.</h2>
           </div>
           <button
             className="icon-button"
@@ -198,7 +198,7 @@ export function ProfileEditor({
               />
             </label>
             <label>
-              Quiet hours start
+              Quiet hours start (hour, 0–23)
               <input
                 type="number"
                 min={0}
@@ -208,7 +208,7 @@ export function ProfileEditor({
               />
             </label>
             <label>
-              Quiet hours end
+              Quiet hours end (hour, 0–23)
               <input
                 type="number"
                 min={0}
@@ -313,7 +313,7 @@ export function ProfileEditor({
             </label>
           </div>
           <div className="contacts-heading">
-            <h3>People who can help</h3>
+            <h3>Contacts and escalation</h3>
             <button
               type="button"
               className="text-button"
@@ -439,8 +439,8 @@ export function ProfileEditor({
             </div>
           ))}
           <p className="muted">
-            Skeleton-only privacy. Camera video stays on the capture device.
-            Walker recognition is outside this demo.
+            The server stores body landmarks, not video. Camera video stays on
+            the capture device. Walker recognition is outside this demo.
           </p>
           {error && (
             <div role="alert" className="error">
