@@ -212,9 +212,6 @@ summary {
 .text-button:hover:not(:disabled) {
   text-decoration-thickness: 2px;
 }
-.text-link {
-  font-size: 15px;
-}
 
 /* Labels and status */
 .eyebrow {
@@ -278,12 +275,12 @@ summary {
   --level-soft: var(--mist);
 }
 .urgency-1 {
-  --level: var(--sky);
-  --level-soft: var(--sky-soft);
-}
-.urgency-2 {
   --level: var(--butter);
   --level-soft: var(--butter-soft);
+}
+.urgency-2 {
+  --level: var(--sky);
+  --level-soft: var(--sky-soft);
 }
 .urgency-3 {
   --level: var(--vermilion);
@@ -454,14 +451,6 @@ nav button.active {
   margin-left: 4px;
   font-size: 14px;
 }
-.demo-label {
-  display: block;
-  margin: 18px 0 0 4px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  color: var(--slate);
-}
 .main-shell {
   flex: 1;
   min-width: 0;
@@ -485,22 +474,6 @@ nav button.active {
 }
 .breadcrumb strong {
   color: var(--navy);
-}
-.topbar-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.operator-avatar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  background: var(--mist);
-  color: var(--navy);
-  font-size: 13px;
-  font-weight: 600;
 }
 
 /* Workspace: a ledger of numbered entries */
@@ -568,8 +541,8 @@ nav button.active {
 }
 .error {
   padding: 12px 16px;
-  background: var(--vermilion-soft);
-  border-left: 3px solid var(--vermilion);
+  background: var(--mist);
+  border-left: 3px solid var(--navy);
   color: var(--navy);
   font-size: 15px;
 }
@@ -579,55 +552,17 @@ nav button.active {
   color: var(--navy);
 }
 .error-text {
-  color: var(--vermilion) !important;
+  color: var(--slate) !important;
 }
 
-/* Sourced figures, typeset in a row rather than as cards */
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-bottom: 48px;
-  border-top: 1px solid var(--navy);
-  border-bottom: 1px solid var(--line);
-}
-.summary-card {
-  min-width: 0;
-  padding: 14px 24px 20px;
-  border-left: 1px solid var(--line);
-}
-.summary-card:first-child {
-  padding-left: 0;
-  border-left: 0;
-}
-.summary-card > span {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--slate);
-}
-.summary-card strong {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
-  margin-top: 10px;
-  font-size: 48px;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: -0.025em;
-  color: var(--navy);
-}
-.summary-card small {
-  font-size: 15px;
-  font-weight: 400;
-  letter-spacing: 0;
-  color: var(--slate);
-}
+/* Panels */
 .content-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: 56px;
+}
+.content-grid > * {
+  min-width: 0;
 }
 .panel {
   padding: 16px 0 0;
@@ -669,23 +604,6 @@ nav button.active {
 .room-grid {
   position: absolute;
   inset: 0;
-  background-image:
-    repeating-linear-gradient(
-      90deg,
-      transparent 0 63px,
-      rgb(140 193 234 / 0.09) 63px 64px
-    ),
-    repeating-linear-gradient(
-      0deg,
-      transparent 0 63px,
-      rgb(140 193 234 / 0.09) 63px 64px
-    );
-}
-.room-grid::after {
-  content: "";
-  position: absolute;
-  inset: 19% 18% 17%;
-  border: 1px solid rgb(140 193 234 / 0.22);
 }
 .camera-video {
   display: none;
@@ -760,16 +678,14 @@ nav button.active {
   font-weight: 500;
 }
 .camera-label .dot {
-  width: 6px;
-  height: 6px;
-  background: var(--sky-light);
+  display: none;
 }
 .camera-bottom {
   bottom: 14px;
   padding: 6px 8px;
   background: rgb(15 29 49 / 0.85);
   color: var(--white);
-  font-size: 13px;
+  font-size: 15px;
 }
 .camera-bottom > span:last-child {
   color: var(--sky-light);
@@ -857,34 +773,20 @@ nav button.active {
   margin-top: 4px;
   font-size: 18px;
   overflow-wrap: anywhere;
-  text-transform: capitalize;
 }
-.calibration {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-  font-size: 15px;
-  color: var(--slate);
+.feature-strip strong::first-letter {
+  text-transform: uppercase;
 }
-.calibration summary,
-.payload-preview summary,
-.baseline-panel summary {
+.payload-preview summary {
   cursor: pointer;
   color: var(--navy);
   font-weight: 500;
 }
-.calibration summary:hover,
-.payload-preview summary:hover,
-.baseline-panel summary:hover {
+.payload-preview summary:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.calibration p {
-  margin: 10px 0;
-}
-.simulated-clock,
-.floor-decision,
-.baseline-reason {
+.simulated-clock {
   display: grid;
   gap: 4px;
   margin: 16px 0;
@@ -907,6 +809,7 @@ nav button.active {
   align-items: center;
   gap: 14px;
   width: 100%;
+  min-width: 0;
   padding: 14px 8px;
   border: 0;
   border-bottom: 1px solid var(--line);
@@ -943,15 +846,6 @@ nav button.active {
   flex-shrink: 0;
   color: var(--edge);
 }
-.event-symbol {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  color: var(--level, var(--slate));
-}
 .empty-events {
   padding: 20px 0;
 }
@@ -969,17 +863,6 @@ nav button.active {
   display: flex;
   flex-direction: column;
   gap: 36px;
-}
-.person-avatar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 56px;
-  height: 56px;
-  background: var(--rose-soft);
-  color: var(--rose);
-  font-size: 26px;
-  font-weight: 600;
 }
 .person-panel > h2 {
   margin-top: 16px;
@@ -1007,8 +890,9 @@ nav button.active {
   padding-top: 16px;
   border-top: 1px solid var(--line);
 }
-.profile-details .rule-tags {
+.profile-details .conditions {
   margin-top: 10px;
+  font-size: 15px;
 }
 .profile-details p {
   margin-top: 16px;
@@ -1022,21 +906,6 @@ nav button.active {
   margin-top: 2px;
   font-size: 14px;
   color: var(--slate);
-}
-.support-card {
-  padding: 24px;
-  background: var(--sky-soft);
-}
-.support-card h3 {
-  font-size: 20px;
-  line-height: 1.3;
-}
-.support-card p {
-  margin-top: 8px;
-  font-size: 15px;
-}
-.support-card .text-button {
-  margin-top: 14px;
 }
 .small-note {
   display: flex;
@@ -1067,10 +936,22 @@ nav button.active {
   color: var(--navy);
   font-weight: 700;
 }
-.footer-mark {
-  display: block;
-  width: auto;
-  height: 18px;
+
+/* Trusted circle told: the Sky plane (human follow-up) */
+.told-card {
+  margin-bottom: 48px;
+  padding: 28px 32px;
+  background: var(--sky-soft);
+}
+.told-card h2 {
+  margin: 8px 0;
+  font-size: 30px;
+}
+.told-card p {
+  font-size: 16px;
+}
+.told-card .eyebrow {
+  color: var(--sky);
 }
 
 /* Check-in: the Butter plane */
@@ -1094,37 +975,7 @@ nav button.active {
   color: var(--butter);
 }
 
-/* Setup */
-.setup-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 56px;
-}
-.setup-grid h2 {
-  margin: 10px 0 12px;
-}
-.setup-grid p {
-  margin-bottom: 16px;
-  color: var(--slate);
-}
-.setup-status {
-  display: flex;
-  gap: 14px;
-  margin: 24px 0;
-  padding: 16px 18px;
-  background: var(--mist);
-  color: var(--navy);
-}
-.setup-status strong {
-  font-size: 16px;
-}
-.setup-status p {
-  margin: 4px 0 0;
-  font-size: 14px;
-}
-.setup-grid .primary {
-  margin-bottom: 16px;
-}
+/* Callouts */
 .privacy-callout {
   margin: 0 0 18px;
   padding: 4px 0 4px 16px;
@@ -1330,46 +1181,37 @@ legend {
   align-self: end;
   margin-bottom: 2px;
 }
-.zone-fields {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.zone-fields > label {
-  width: calc(25% - 8px);
-  min-width: 110px;
-}
-.zone-fields > small {
-  font-size: 13px;
-  color: var(--slate);
-}
 
-/* Event detail */
+/* Event detail: noticed, cannot tell, who was told, you decide */
+.detail-section {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.modal .detail-section h3 {
+  margin: 6px 0 12px;
+}
+.detail-section > p {
+  max-width: 72ch;
+  margin: 8px 0;
+}
+.detail-section .keyframes {
+  margin: 16px 0;
+}
+.detail-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+.detail-list li {
+  margin: 4px 0;
+}
+.detail-decision .action-row {
+  margin-top: 12px;
+}
 .event-summary {
   margin-bottom: 16px;
   font-size: 19px;
   line-height: 1.55;
-}
-.comparison-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 24px 0;
-  border-top: 1px solid var(--navy);
-}
-.comparison-grid section {
-  min-width: 0;
-  padding: 14px 20px 16px 0;
-}
-.comparison-grid section + section {
-  padding: 14px 0 16px 20px;
-  border-left: 1px solid var(--line);
-}
-.comparison-grid h3 {
-  margin: 6px 0 8px;
-}
-.comparison-grid p {
-  margin-bottom: 10px;
-  font-size: 15px;
 }
 .keyframes {
   display: grid;
@@ -1387,14 +1229,6 @@ legend {
   left: 10px;
   color: var(--sky-light);
   font-size: 12px;
-}
-.event-columns {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 32px;
-}
-.event-columns section > p + p {
-  margin-top: 10px;
 }
 .metrics-list {
   margin: 16px 0;
@@ -1494,108 +1328,22 @@ legend {
   padding: 18px 20px;
   background: var(--mist);
 }
-.action-heading {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.action-heading h3 {
-  margin: 0;
-  font-size: 17px;
-}
 .action-panel p {
   margin-top: 8px;
   font-size: 15px;
   line-height: 1.55;
 }
-.action-panel small {
-  display: block;
-  margin-top: 8px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--slate);
-}
-.action-scores {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin: 16px 0;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-}
-.action-scores > div {
-  padding: 10px 14px;
-  border-left: 1px solid var(--line);
-}
-.action-scores > div:first-child {
-  padding-left: 0;
-  border-left: 0;
-}
-.action-scores span,
-.action-scores strong {
-  display: block;
-}
-.action-scores span {
-  font-size: 13px;
-  color: var(--slate);
-}
-.action-scores strong {
-  font-size: 24px;
-  line-height: 1.2;
-}
-.action-panel ol {
+.action-panel h4 {
   margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.action-panel li {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 7px 0;
-  border-bottom: 1px solid var(--line);
-  font-size: 15px;
+  font-size: 16px;
+  font-weight: 600;
 }
 
-/* Typeset tables and charts */
-.table-scroll table {
-  width: 100%;
-  margin: 16px 0;
-  border-collapse: collapse;
-  font-size: 15px;
-}
-.table-scroll th,
-.table-scroll td {
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--line);
-  text-align: left;
-  white-space: nowrap;
-}
-.table-scroll th {
-  background: var(--mist);
-  color: var(--slate);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.trend-chart text {
-  font-family: var(--font);
-  fill: var(--slate);
-}
-.baseline-panel h3 {
-  font-size: 22px;
-}
-.baseline-panel p,
+/* Privacy */
 .privacy-panel p {
   max-width: 72ch;
   margin: 12px 0;
   line-height: 1.65;
-}
-.baseline-panel details {
-  padding: 10px 0;
-  border-top: 1px solid var(--line);
 }
 .privacy-panel h3 {
   margin: 32px 0 4px;
@@ -1605,22 +1353,33 @@ legend {
   padding: 24px;
   border: 1px solid var(--line);
 }
-.delete-panel h3 {
-  margin: 0;
+.delete-panel > summary {
+  cursor: pointer;
+  font-size: 17px;
+  font-weight: 600;
+}
+.delete-panel[open] > summary {
+  margin-bottom: 12px;
+}
+.delete-panel p {
+  margin-bottom: 12px;
 }
 .danger-button {
   min-height: 44px;
   padding: 10px 18px;
-  border: 1px solid var(--vermilion);
+  border: 1px solid var(--navy);
   border-radius: var(--radius);
-  background: var(--vermilion);
-  color: var(--white);
+  background: var(--white);
+  color: var(--navy);
   font-size: 15px;
   font-weight: 600;
 }
 .danger-button:hover:not(:disabled) {
-  background: var(--vermilion-hover);
-  border-color: var(--vermilion-hover);
+  background: var(--mist);
+}
+.danger-button:disabled {
+  border-color: var(--edge);
+  color: var(--slate);
 }
 .deletion-receipt {
   margin-top: 24px;
@@ -1629,10 +1388,6 @@ legend {
 }
 .deletion-receipt h3 {
   margin: 0;
-}
-.empty-copy {
-  padding: 32px 0;
-  color: var(--slate);
 }
 
 /* Sign in: the Navy plane holds the statement */
@@ -1729,8 +1484,8 @@ legend {
   height: 40px;
 }
 .contact-card {
-  padding: 32px;
-  border: 1px solid var(--line);
+  padding: 0;
+  border: 0;
 }
 .contact-card h1 {
   margin: 12px 0 16px;
@@ -1793,9 +1548,6 @@ legend {
   h1 {
     font-size: 38px;
   }
-  .summary-card strong {
-    font-size: 40px;
-  }
   .feature-strip > div {
     padding: 10px 10px;
   }
@@ -1841,18 +1593,12 @@ legend {
   .camera-stage {
     aspect-ratio: 1.8;
   }
-  .setup-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .login-art {
     padding: 44px;
   }
   .login-art h1 {
     margin-top: 72px;
     font-size: 44px;
-  }
-  .topbar-right {
-    gap: 10px;
   }
   .page-heading {
     align-items: flex-start;
@@ -1923,10 +1669,6 @@ legend {
     font-size: 13px;
     white-space: nowrap;
   }
-  .topbar-right .pill,
-  .operator-avatar {
-    display: none;
-  }
   .replay-controls select {
     flex: 1 1 40%;
     width: auto;
@@ -1953,29 +1695,6 @@ legend {
   }
   .demo-banner > span:last-child {
     display: none;
-  }
-  .summary-grid {
-    grid-template-columns: minmax(0, 1fr);
-    margin-bottom: 36px;
-  }
-  .summary-card,
-  .summary-card:first-child {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 12px 0;
-    border-left: 0;
-    border-top: 1px solid var(--line);
-  }
-  .summary-card:first-child {
-    border-top: 0;
-  }
-  .summary-card strong {
-    justify-content: flex-end;
-    margin-top: 0;
-    font-size: 30px;
-    text-align: right;
   }
   .camera-stage {
     min-height: 260px;
@@ -2021,7 +1740,7 @@ legend {
     flex-basis: calc(100% - 80px);
   }
   .event-row > .pill {
-    margin-left: 38px;
+    margin-left: 0;
   }
   .event-row > svg {
     display: none;
@@ -2033,7 +1752,11 @@ legend {
     display: block;
     padding: 22px 20px;
   }
-  .check-in h2 {
+  .told-card {
+    padding: 22px 20px;
+  }
+  .check-in h2,
+  .told-card h2 {
     font-size: 24px;
   }
   .check-in .primary {
@@ -2063,29 +1786,6 @@ legend {
   .contact-edit > .icon-button {
     grid-column: 2;
     grid-row: 3;
-  }
-  .comparison-grid,
-  .event-columns {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0;
-  }
-  .comparison-grid section,
-  .comparison-grid section + section {
-    padding: 14px 0;
-    border-left: 0;
-  }
-  .comparison-grid section + section {
-    border-top: 1px solid var(--line);
-  }
-  .action-scores {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .action-scores > div {
-    padding: 8px 0;
-    border-left: 0;
-  }
-  .action-scores > div + div {
-    border-top: 1px solid var(--line);
   }
   .keyframes {
     gap: 6px;
@@ -2136,7 +1836,7 @@ legend {
     padding: 28px 16px;
   }
   .contact-card {
-    padding: 24px 20px;
+    padding: 0;
   }
   .contact-card h1 {
     font-size: 30px;

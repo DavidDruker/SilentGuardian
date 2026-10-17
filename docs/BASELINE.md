@@ -67,6 +67,6 @@ fine-tuned or validated on teammate recordings and does not replace this baselin
 
 ## Trends
 
-**Trends** shows daily means and standard deviations against the frozen calibration median. **Load synthetic drift example** writes six labelled days of sample rows into the configured database, segregated from observed data and excluded from calibration. It does not provision Tiger Data or imply measured decline.
+The Trends screen was removed from the demo UI; `GET /api/trends/{person_id}` still returns daily means and standard deviations against the frozen calibration median. **Load synthetic drift example** writes six labelled days of sample rows into the configured database, segregated from observed data and excluded from calibration. It does not provision Tiger Data or imply measured decline.
 
-The UI computes its displayed values from retained rows. `deploy/tiger.sql` additionally defines a daily continuous aggregate using mean/stddev instead of relying on `percentile_cont` support. Actual migration and aggregate refresh still require verification on the provisioned Tiger service. Seven-day retention applies to the small demo; a longer drift study needs a deliberate retention and budget decision.
+The API computes these values from retained rows. `deploy/tiger.sql` additionally defines a daily continuous aggregate using mean/stddev instead of relying on `percentile_cont` support. Actual migration and aggregate refresh still require verification on the provisioned Tiger service. Seven-day retention applies to the small demo; a longer drift study needs a deliberate retention and budget decision.

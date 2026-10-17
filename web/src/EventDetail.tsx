@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, ExternalLink, MessageSquare, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { api, type GuardianEvent, type Landmark, type Profile } from "./api";
 import { Skeleton } from "./Skeleton";
 import { ActionPanel } from "./ActionPanel";
@@ -11,7 +11,80 @@ export const timeLabel = (t: number) =>
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+    hourCycle: "h23",
   });
+
+const ruleLabels: Record<string, string> = {
+  fall: "fall",
+  prolonged_stillness: "fall, then still",
+  stumble: "stumble",
+  sway: "unsteady sway",
+  restricted_standing: "standing without a helper at night",
+  bed_exit: "bed exit at night",
+  personal_baseline: "change from usual movement",
+};
+const ruleLabel = (r: string) => ruleLabels[r] ?? pretty(r);
+
+const sourceLabel = (s: string) =>
+  s === "replay" ? "Synthetic replay" : s === "demo_call" ? "Demo call" : "Camera";
+
+const channelLabel = (c: string) =>
+  c === "push" ? "Browser push" : c === "call" ? "Phone call" : pretty(c);
+
+const stateLabels: Record<string, string> = {
+  simulated: "Sent (simulated)",
+  provider_accepted: "Accepted by provider",
+  pending: "Scheduled",
+  retry: "Retrying",
+  cancelled: "Stopped",
+  suppressed: "Call limit reached",
+  configuration_required: "Needs setup",
+  unknown: "Status unknown",
+};
+const stateLabel = (s: string) => stateLabels[s] ?? pretty(s);
+
+/** Send time relative to the signal, so simulated and real clocks never mix. */
+const afterSignal = (seconds: number) => {
+  const s = Math.round(seconds);
+  if (s < 1) return "at the signal";
+  return s >= 60 && s % 60 === 0 ? `${s / 60} min after` : `${s} s after`;
+};
+
+const assessmentLines: Record<string, string> = {
+  rules_only:
+    "Second assessment: rules only. Gemini is not set up for this deployment.",
+  privacy_blocked:
+    "Second assessment off. Gemini needs profile consent and a confirmed billed project.",
+  pending: "Second assessment pending. The rule-based level applies now.",
+  fallback:
+    "The Gemini response did not pass validation. The rule-based level stays.",
+};
+
+type Notice = GuardianEvent["notifications"][number];
+
+/** One row per recipient and channel, summarised from its latest send. */
+function groupNotifications(list: Notice[]) {
+  const groups = new Map<string, Notice[]>();
+  for (const n of list) {
+    const key = JSON.stringify([n.recipient, n.channel]);
+    const group = groups.get(key);
+    if (group) group.push(n);
+    else groups.set(key, [n]);
+  }
+  return [...groups].map(([key, items]) => {
+    const sorted = [...items].sort((a, b) => a.due_at - b.due_at);
+    const latest = sorted[sorted.length - 1];
+    return {
+      key,
+      recipient: latest.recipient,
+      channel: latest.channel,
+      firstDue: sorted[0].due_at,
+      count: sorted.length,
+      latest,
+      error: [...sorted].reverse().find((n) => n.last_error)?.last_error,
+    };
+  });
+}
 
 export function EventDetail({
   event,
@@ -30,16 +103,12 @@ export function EventDetail({
     [busy, setBusy] = useState(false);
   const [payload, setPayload] = useState<unknown>(null);
   const preview = async () => {
+    if (payload !== null) {
+      setPayload(null);
+      return;
+    }
     try {
       setPayload(await api(`/events/${event.id}/payload-preview`));
-    } catch (e) {
-      onError(String(e));
-    }
-  };
-  const demonstrateFloor = async () => {
-    try {
-      await api(`/demo/floor/${event.id}`, "POST");
-      onChange();
     } catch (e) {
       onError(String(e));
     }
@@ -48,7 +117,10 @@ export function EventDetail({
     setBusy(true);
     try {
       await api(`/events/${event.id}/ack`, "POST", {
-        author: "Demo operator",
+        author:
+          profile?.mode === "care"
+            ? "Charge nurse"
+            : profile?.alias || "Operator",
         note,
       });
       onChange();
@@ -76,6 +148,45 @@ export function EventDetail({
       onError(String(e));
     }
   };
+
+  const isDemoCall = event.source === "demo_call";
+  // Long-lie evidence extends an open fall record, so prefer it for the title.
+  const headlineRule = event.rule_hits.includes("prolonged_stillness")
+    ? "prolonged_stillness"
+    : event.rule_hits[0];
+  const title = headlineRule
+    ? `${event.alias}: possible ${ruleLabel(headlineRule)}`
+    : `${event.alias}: demo phone call`;
+
+  const f = event.features;
+  const metrics: [string, string][] = [];
+  if (f.posture != null) metrics.push(["Posture", pretty(String(f.posture))]);
+  if (f.trunk_angle != null) metrics.push(["Trunk angle", `${f.trunk_angle}°`]);
+  if (f.still_seconds != null)
+    metrics.push(["Still for", `${f.still_seconds} s`]);
+  if (typeof f.helper_present === "boolean")
+    metrics.push(["Helper nearby", f.helper_present ? "Yes" : "No"]);
+
+  const verdict = event.verdict;
+  const floor = event.floor_decision;
+  const proposer = String(floor?.source ?? "").startsWith("Gemini")
+    ? "Gemini"
+    : "A simulated downgrade";
+  const groups = groupNotifications(event.notifications);
+  const feedbackButtons = (small: boolean) => {
+    const className = small ? "secondary small" : "secondary";
+    return (
+      <>
+        <button className={className} onClick={() => feedback("confirmed")}>
+          Real concern
+        </button>
+        <button className={className} onClick={() => feedback("false_alarm")}>
+          False alarm
+        </button>
+      </>
+    );
+  };
+
   return (
     <div className="modal-shade">
       <section
@@ -89,10 +200,10 @@ export function EventDetail({
             <span className={`pill urgency-${event.urgency}`}>
               Level {event.urgency} · {urgencyNames[event.urgency]}
             </span>
-            <h2 id="event-title">{event.alias}’s event record.</h2>
+            <h2 id="event-title">{title}</h2>
             <p className="muted">
-              {timeLabel(event.opened_at)} · Profile v{event.profile_version} ·{" "}
-              {pretty(event.source)}
+              Observed {timeLabel(event.observed_at)} ·{" "}
+              {sourceLabel(event.source)}
             </p>
           </div>
           <button
@@ -104,239 +215,218 @@ export function EventDetail({
           </button>
         </header>
         <p className="event-summary">{event.summary}</p>
-        {Number(event.features.demo_time_scale) > 1 && (
+        {Number(f.demo_time_scale) > 1 && (
           <p className="simulated-clock">
-            SIMULATED TIME · {String(event.features.demo_time_scale)}×. Observed
-            clock: {timeLabel(event.observed_at)}.
+            Simulated time · {String(f.demo_time_scale)}×.
           </p>
         )}
-        <div className="comparison-grid">
-          <section>
-            <span className="eyebrow">RULES ONLY</span>
-            <h3>Observed pattern + minimum level</h3>
-            <p>{event.rule_summary}</p>
-            <strong>Minimum level {event.floor_urgency}</strong>
-          </section>
-          <section>
-            <span className="eyebrow">GEMINI ASSESSMENT</span>
-            <h3>
-              {event.verdict_status === "validated"
-                ? "Validated response"
-                : "Rule-based fallback active"}
-            </h3>
-            <p>
-              {event.verdict?.summary ||
-                (event.verdict_status === "privacy_blocked"
-                  ? "External assessment is off: profile consent and a confirmed billed project are required."
-                  : "No validated Gemini response is available. The provisional alert stays active.")}
-            </p>
-            <span className="pill">{pretty(event.verdict_status)}</span>
-          </section>
-        </div>
-        {event.floor_decision && (
-          <div className="floor-decision" role="status">
-            <strong>{String(event.floor_decision.source)}</strong>
-            <p>
-              Proposed level {String(event.floor_decision.proposed)} → minimum
-              level {String(event.floor_decision.floor)} → applied level{" "}
-              {String(event.floor_decision.applied)}.{" "}
-              {event.floor_decision.blocked
-                ? "Downgrade blocked."
-                : "Minimum level kept."}
-            </p>
-          </div>
-        )}
-        <div className="action-row">
-          <button className="secondary small" onClick={preview}>
-            Preview Gemini payload
-          </button>
-          {event.source === "replay" && (
-            <button className="secondary small" onClick={demonstrateFloor}>
-              Demonstrate blocked downgrade
-            </button>
-          )}
-        </div>
-        {payload !== null && (
-          <details open className="payload-preview">
-            <summary>
-              Exact category-only package preview · skeleton keyframes listed
-              separately
-            </summary>
-            <pre>{JSON.stringify(payload, null, 2)}</pre>
-          </details>
-        )}
-        <div className="rule-tags">
-          {event.rule_hits.map((r) => (
-            <span className="tag" key={r}>
-              {pretty(r)}
-            </span>
-          ))}
-        </div>
-        {event.keyframes.length > 0 && (
-          <>
-            <h3>Skeleton keyframes</h3>
-            <div className="keyframes">
-              {event.keyframes.map((f, i) => (
-                <div key={i}>
-                  <Skeleton poses={[(f.landmarks || []) as Landmark[]]} />
-                  <span>
-                    {i === 0
-                      ? "Window start"
-                      : i === 1
-                        ? "Window midpoint"
-                        : "At trigger"}{" "}
-                    · skeleton only
+
+        {!isDemoCall && (
+          <section
+            className="detail-section"
+            aria-labelledby="detail-noticed-title"
+          >
+            <span className="eyebrow">NOTICED</span>
+            <h3 id="detail-noticed-title">What Hayvn noticed</h3>
+            {event.rule_summary && event.rule_summary !== event.summary && (
+              <p>{event.rule_summary}</p>
+            )}
+            {event.rule_hits.length > 0 && (
+              <div className="rule-tags">
+                {event.rule_hits.map((r) => (
+                  <span className="tag" key={r}>
+                    {pretty(r)}
                   </span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-        <div className="event-columns">
-          <section>
-            <h3>Observed movement</h3>
-            <dl className="metrics-list">
-              {Object.entries(event.features)
-                .filter(([k, v]) => v !== null && !k.endsWith("_json"))
-                .map(([k, v]) => (
-                  <div key={k}>
-                    <dt>{pretty(k)}</dt>
-                    <dd>{String(v)}</dd>
+                ))}
+              </div>
+            )}
+            {event.keyframes.length > 0 && (
+              <div className="keyframes">
+                {event.keyframes.map((k, i) => (
+                  <div key={i}>
+                    <Skeleton poses={[(k.landmarks || []) as Landmark[]]} />
+                    <span>
+                      {i === 0
+                        ? "Window start"
+                        : i === 1
+                          ? "Window midpoint"
+                          : "At trigger"}{" "}
+                      · skeleton only
+                    </span>
                   </div>
                 ))}
-            </dl>
-          </section>
-          <section>
-            <h3>Assessment</h3>
-            <p>
-              <span className="pill">
-                {event.verdict_status === "validated"
-                  ? "Gemini · validated"
-                  : "Rule-based assessment"}
-              </span>
-            </p>
-            <p className="muted">
-              Minimum level: {event.floor_urgency}.{" "}
-              {event.verdict_status === "fallback"
-                ? "Gemini was unavailable or its response did not pass validation."
-                : ""}
-            </p>
-            {event.verdict?.evidence.map((e, i) => (
-              <p className="evidence" key={i}>
-                <code>{e.ref}</code>
-                <br />
-                {e.detail}
-              </p>
-            ))}
-            {event.verdict?.recommended_actions.map((s, i) => (
-              <p key={i}>{s}</p>
-            ))}
-            <p className="muted">
-              This signal is for staff review. It is not a diagnosis.
-            </p>
-          </section>
-        </div>
-        {event.action_prediction && <ActionPanel prediction={event.action_prediction} />}
-        {Boolean(event.baseline_contributions?.length) && (
-          <section>
-            <h3>Personal baseline evidence</h3>
-            {event.baseline_contributions?.map((c, i) => (
-              <p key={i}>
-                {pretty(String(c.feature))}: {Number(c.value).toFixed(3)} vs
-                median {Number(c.median).toFixed(3)} · modified z ={" "}
-                {Number(c.z).toFixed(2)}
-              </p>
-            ))}
-          </section>
-        )}
-        <h3>Notification timeline</h3>
-        {event.notifications.length > 12 && (
-          <p className="muted">
-            Showing the latest 12 of {event.notifications.length} attempts. All
-            attempts remain stored in the event record.
-          </p>
-        )}
-        <div className="notification-list">
-          {event.notifications.length === 0 ? (
-            <p className="muted">
-              {event.status === "acknowledged"
-                ? "Acknowledged before contact escalation."
-                : "Waiting for the person’s check-in before contacting their circle."}
-            </p>
-          ) : (
-            event.notifications.slice(-12).map((n) => (
-              <div key={n.id}>
-                <span
-                  className={`timeline-dot ${n.state === "simulated" ? "simulated" : ""}`}
-                />
-                <div>
-                  <strong>{n.recipient}</strong>
-                  <small>
-                    {pretty(n.channel)} · {timeLabel(n.due_at)} · {n.attempts}{" "}
-                    attempt{n.attempts !== 1 ? "s" : ""}
-                  </small>
-                  {n.last_error && (
-                    <small className="error-text">{n.last_error}</small>
-                  )}
-                </div>
-                <span className="pill">{pretty(n.state)}</span>
               </div>
-            ))
-          )}
-        </div>
-        {event.status === "dismissed" ? (
-          <div className="acknowledged">
-            Dismissed and logged for review. Future sends for this event
-            stopped; continued long-lie evidence can open a new alert and raise
-            the minimum level.
-          </div>
-        ) : event.status === "acknowledged" ? (
-          <div className="acknowledged">
-            <Check size={18} /> Acknowledged by {event.acknowledged_by}. Future
-            sends have stopped.
-          </div>
-        ) : (
-          <>
-            <label className="note-label">
-              Response note
-              <textarea
-                maxLength={500}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="On my way, or checked and okay…"
-              />
-            </label>
-            <button className="primary" disabled={busy} onClick={ack}>
-              <Check size={16} /> Acknowledge event
-            </button>
-          </>
+            )}
+            {metrics.length > 0 && (
+              <dl className="metrics-list">
+                {metrics.map(([label, value]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            {event.action_prediction && (
+              <ActionPanel prediction={event.action_prediction} />
+            )}
+          </section>
         )}
-        <footer>
-          <div>
-            <button
-              className="text-button"
-              onClick={() => feedback("confirmed")}
-            >
-              <MessageSquare size={14} /> Confirm event
-            </button>
-            <button
-              className="text-button"
-              onClick={() => feedback("false_alarm")}
-            >
-              Dismiss as false alarm
-            </button>
+
+        {!isDemoCall && (
+          <section
+            className="detail-section"
+            aria-labelledby="detail-limits-title"
+          >
+            <span className="eyebrow">CANNOT TELL</span>
+            <h3 id="detail-limits-title">What it cannot tell</h3>
+            <p>
+              Whether {event.alias} is hurt, in pain, or why the movement
+              changed. Hayvn sees body landmarks only, with no video or sound.
+            </p>
+            {event.verdict_status === "validated" && verdict ? (
+              <>
+                <p>
+                  Gemini second assessment (
+                  {Math.round(verdict.confidence * 100)}% confidence):{" "}
+                  {verdict.summary}
+                </p>
+                {verdict.evidence.map((e, i) => (
+                  <p className="evidence" key={i}>
+                    {e.detail}
+                  </p>
+                ))}
+                {verdict.recommended_actions.length > 0 && (
+                  <ul className="detail-list">
+                    {verdict.recommended_actions.map((s, i) => (
+                      <li key={i}>{s}</li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : (
+              assessmentLines[event.verdict_status] && (
+                <p className="muted">
+                  {assessmentLines[event.verdict_status]}
+                </p>
+              )
+            )}
+            {floor && (
+              <p className="muted">
+                {floor.blocked
+                  ? `${proposer} proposed level ${String(floor.proposed)}. Hayvn kept level ${String(floor.applied)}: a second assessment can raise the level, never lower it below the rule level.`
+                  : `Applied level ${String(floor.applied)}.`}
+              </p>
+            )}
+            {event.verdict_status !== "not_requested" && (
+              <button
+                className="text-button"
+                aria-expanded={payload !== null}
+                onClick={preview}
+              >
+                What Gemini would receive
+              </button>
+            )}
+            {payload !== null && (
+              <details open className="payload-preview">
+                <summary>
+                  Category-only package. Skeleton keyframes are sent
+                  separately.
+                </summary>
+                <pre>{JSON.stringify(payload, null, 2)}</pre>
+              </details>
+            )}
+          </section>
+        )}
+
+        <section
+          className="detail-section"
+          aria-labelledby="detail-told-title"
+        >
+          <span className="eyebrow">NOTIFICATIONS</span>
+          <h3 id="detail-told-title">Who was told</h3>
+          <div className="notification-list">
+            {groups.length === 0 ? (
+              <p className="muted">
+                {event.status === "acknowledged"
+                  ? "Acknowledged before contact escalation."
+                  : "Waiting for the person’s check-in before contacting their circle."}
+              </p>
+            ) : (
+              groups.map((g) => (
+                <div key={g.key}>
+                  <span
+                    className={`timeline-dot ${g.latest.state === "simulated" ? "simulated" : ""}`}
+                  />
+                  <div>
+                    <strong>{g.recipient}</strong>
+                    <small>
+                      {channelLabel(g.channel)} ·{" "}
+                      {afterSignal(g.firstDue - event.opened_at)} ·{" "}
+                      {g.count} send{g.count !== 1 ? "s" : ""}
+                    </small>
+                    {g.error && <small className="error-text">{g.error}</small>}
+                  </div>
+                  <span className="pill">{stateLabel(g.latest.state)}</span>
+                </div>
+              ))
+            )}
           </div>
+        </section>
+
+        <section
+          className="detail-section detail-decision"
+          aria-labelledby="detail-decide-title"
+        >
+          <span className="eyebrow">DECISION</span>
+          <h3 id="detail-decide-title">You decide</h3>
+          {event.status === "dismissed" ? (
+            <>
+              <div className="acknowledged">
+                Dismissed and logged for review. Future sends for this event
+                stopped; continued long-lie evidence can open a new alert and
+                raise the minimum level.
+              </div>
+              <div className="action-row">{feedbackButtons(true)}</div>
+            </>
+          ) : event.status === "acknowledged" ? (
+            <>
+              <div className="acknowledged">
+                <Check size={18} /> Acknowledged by {event.acknowledged_by}.
+                Future sends have stopped.
+              </div>
+              <div className="action-row">{feedbackButtons(true)}</div>
+            </>
+          ) : (
+            <>
+              <label className="note-label">
+                Response note
+                <textarea
+                  maxLength={500}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="On my way, or checked and okay…"
+                />
+              </label>
+              <div className="action-row">
+                <button className="primary" disabled={busy} onClick={ack}>
+                  Acknowledge
+                </button>
+                {feedbackButtons(false)}
+              </div>
+            </>
+          )}
           {event.human_review && (
-            <span className="pill">
-              Human review: {pretty(event.human_review)}
-            </span>
+            <p className="muted">Human review: {pretty(event.human_review)}</p>
           )}
           {Boolean(profile?.contacts?.length) && (
-            <button className="secondary small" onClick={link}>
-              Contact view <ExternalLink size={13} />
-            </button>
+            <div className="action-row">
+              <button className="secondary small" onClick={link}>
+                What the contact sees
+              </button>
+            </div>
           )}
-        </footer>
+        </section>
       </section>
     </div>
   );

@@ -1,27 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  Activity,
-  Bell,
-  ChartLine,
-  Check,
-  ChevronRight,
-  CircleHelp,
-  ClipboardCheck,
-  HeartHandshake,
-  LayoutDashboard,
-  LogOut,
-  Phone,
-  ScrollText,
-  Settings2,
-  Users,
-  X,
-} from "lucide-react";
+import { ChevronRight, Phone, Settings2, X } from "lucide-react";
 import { api, type AppConfig, type GuardianEvent, type Profile, uid } from "./api";
 import { Capture } from "./Capture";
 import { ProfileEditor } from "./ProfileEditor";
 import { EventDetail, pretty, timeLabel, urgencyNames } from "./EventDetail";
 import { ContactView } from "./ContactView";
-import { EvidencePanel, PrivacyPanel, TrendsPanel } from "./Experience";
+import { PrivacyPanel } from "./Experience";
 
 type Monitoring = {
   person_id: string;
@@ -30,6 +14,9 @@ type Monitoring = {
   source: string;
   online: boolean;
 };
+const hour = (h?: number) => `${String(h ?? 0).padStart(2, "0")}:00`;
+const duration = (s: number) =>
+  s >= 60 && s % 60 === 0 ? `${s / 60} min` : `${s} s`;
 export default function App() {
   const [config, setConfig] = useState<AppConfig | null>(null),
     [profiles, setProfiles] = useState<Profile[]>([]),
@@ -46,7 +33,7 @@ export default function App() {
     [page, setPage] = useState("overview"),
     [callBusy, setCallBusy] = useState(false);
   const [hash, setHash] = useState(location.hash);
-  const [checkingPose, setCheckingPose] = useState(false);
+  const [now, setNow] = useState(() => Date.now() / 1000);
   useEffect(() => {
     const fn = () => setHash(location.hash);
     addEventListener("hashchange", fn);
@@ -93,6 +80,36 @@ export default function App() {
         profile?.check_in_first &&
         profile.mode === "personal",
     );
+  useEffect(() => {
+    if (!checkIn) return;
+    const timer = setInterval(() => setNow(Date.now() / 1000), 500);
+    return () => clearInterval(timer);
+  }, [checkIn?.id]);
+  const firstContact = profile?.contacts
+    ?.filter((c) => c.min_urgency <= 2)
+    .sort((a, b) => a.delay_seconds - b.delay_seconds)[0];
+  const latest = current[0],
+    told =
+      profile?.mode === "personal" &&
+      !checkIn &&
+      latest &&
+      latest.status !== "dismissed" &&
+      latest.notifications.length > 0 &&
+      Date.now() / 1000 - latest.opened_at < 1800
+        ? latest
+        : undefined;
+  const firstSend = told?.notifications
+    .slice()
+    .sort((a, b) => a.due_at - b.due_at)[0];
+  const review = active
+    .slice()
+    .sort((a, b) => b.urgency - a.urgency || b.opened_at - a.opened_at);
+  const nav = [
+    { id: "overview", label: mode === "care" ? "Care station" : "My home" },
+    { id: "events", label: "Event history" },
+    { id: "circle", label: mode === "care" ? "Care team" : "Trusted circle" },
+    { id: "privacy", label: "Privacy" },
+  ];
   const switchMode = (m: "care" | "personal") => {
     setMode(m);
     setPersonId(profiles.find((p) => p.mode === m)?.id || "");
@@ -181,47 +198,6 @@ export default function App() {
     }
   };
 
-  const checkPose = () => {
-    setCheckingPose(true);
-    const worker = new Worker("/pose-worker.js");
-    const timeout = setTimeout(() => {
-      worker.terminate();
-      setCheckingPose(false);
-      setError(
-        "Pose model check timed out after 30 s. Rebuild the local assets and try again.",
-      );
-    }, 30000);
-    worker.onmessage = (event) => {
-      if (event.data.type === "ready") {
-        const canvas = new OffscreenCanvas(640, 480),
-          context = canvas.getContext("2d")!;
-        context.fillStyle = "#ffffff";
-        context.fillRect(0, 0, 640, 480);
-        const bitmap = canvas.transferToImageBitmap();
-        worker.postMessage(
-          {
-            type: "frame",
-            bitmap,
-            timestamp: performance.now(),
-            region: { x1: 0.15, y1: 0.05, x2: 0.85, y2: 0.98 },
-          },
-          [bitmap],
-        );
-      } else if (event.data.type === "poses" || event.data.type === "error") {
-        clearTimeout(timeout);
-        worker.terminate();
-        setCheckingPose(false);
-        if (event.data.type === "error")
-          setError("Pose model check failed: " + event.data.error);
-        else
-          setNotice(
-            "Pose model loaded and processed a blank test frame. Your camera was not opened.",
-          );
-      }
-    };
-    worker.postMessage({ type: "init" });
-  };
-
   if (hash.startsWith("#contact/"))
     return <ContactView parts={hash.slice(1).split("/")} />;
   if (!logged || !config || !profile)
@@ -249,7 +225,16 @@ export default function App() {
         </div>
         <section className="login-form">
           <h2>Sign in to review signals.</h2>
-          <p>Use the operator access token set for this deployment.</p>
+          <p>
+            {config?.demo_enabled
+              ? "Open the synthetic demo, or sign in with the operator access token for this deployment."
+              : "Use the operator access token set for this deployment."}
+          </p>
+          {config?.demo_enabled && (
+            <button className="primary" onClick={demo}>
+              Open the local demo
+            </button>
+          )}
           <form onSubmit={login}>
             <label>
               Operator access token
@@ -261,13 +246,10 @@ export default function App() {
                 placeholder="Enter your access token"
               />
             </label>
-            <button className="primary">Sign in</button>
-          </form>
-          {config?.demo_enabled && (
-            <button className="secondary" onClick={demo}>
-              Open the local demo
+            <button className={config?.demo_enabled ? "secondary" : "primary"}>
+              Sign in
             </button>
-          )}
+          </form>
           <p className="muted">
             Seeded profiles are synthetic. The server receives body landmarks, not video.
             <br />This is a demonstration, not a medical device.
@@ -282,6 +264,8 @@ export default function App() {
     );
   const selectedEvent = events.find((e) => e.id === detail);
   const stream = monitoring.find((m) => m.person_id === profile.id);
+  const sameMode = profiles.filter((p) => p.mode === mode);
+  const team = mode === "care" ? "care team" : "trusted circle";
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -297,40 +281,23 @@ export default function App() {
             className={mode === "care" ? "selected" : ""}
             onClick={() => switchMode("care")}
           >
-            <Users size={15} /> Care
+            Care
           </button>
           <button
             className={mode === "personal" ? "selected" : ""}
             onClick={() => switchMode("personal")}
           >
-            <HeartHandshake size={15} /> Personal
+            Personal
           </button>
         </div>
         <span className="nav-label">YOUR WORKSPACE</span>
         <nav>
-          {[
-            {
-              id: "overview",
-              icon: LayoutDashboard,
-              label: mode === "care" ? "Care station" : "My home",
-            },
-            { id: "events", icon: Activity, label: "Event history" },
-            {
-              id: "circle",
-              icon: Users,
-              label: mode === "care" ? "Care team" : "Trusted circle",
-            },
-            { id: "setup", icon: Settings2, label: "Demo setup" },
-            { id: "trends", icon: ChartLine, label: "Trends" },
-            { id: "privacy", icon: ClipboardCheck, label: "Privacy" },
-            { id: "evidence", icon: ScrollText, label: "Evidence" },
-          ].map((n) => (
+          {nav.map((n) => (
             <button
               key={n.id}
               className={page === n.id ? "active" : ""}
               onClick={() => setPage(n.id)}
             >
-              <n.icon size={18} />
               {n.label}
               {n.id === "events" && active.length > 0 && (
                 <span className="nav-count">{active.length}</span>
@@ -353,9 +320,8 @@ export default function App() {
               void api("/session", "DELETE").then(() => setLogged(false));
             }}
           >
-            <LogOut size={15} /> Sign out
+            Sign out
           </button>
-          <span className="demo-label">HACKATHON DEMONSTRATION</span>
         </div>
       </aside>
       <div className="main-shell">
@@ -363,26 +329,7 @@ export default function App() {
           <div className="breadcrumb">
             {mode === "care" ? "Care workspace" : "Personal workspace"}
             <ChevronRight size={14} />
-            <strong>
-              {page === "overview"
-                ? mode === "care"
-                  ? "Care station"
-                  : "My home"
-                : pretty(page)}
-            </strong>
-          </div>
-          <div className="topbar-right">
-            <span className="pill green">
-              <span className="dot" /> Local demo
-            </span>
-            <button
-              className="icon-button"
-              aria-label="View events"
-              onClick={() => setPage("events")}
-            >
-              <Bell size={19} />
-            </button>
-            <div className="operator-avatar">OP</div>
+            <strong>{nav.find((n) => n.id === page)?.label}</strong>
           </div>
         </header>
         <main className="workspace">
@@ -404,23 +351,16 @@ export default function App() {
                     ? "Each signal and what happened next."
                     : page === "circle"
                       ? "Who is told, and when."
-                      : page === "trends"
-                        ? "Change from usual, day by day."
-                        : page === "privacy"
-                          ? "What is stored, and who agreed."
-                          : page === "evidence"
-                            ? "What is tested, and what is not."
-                            : "Demo phone and connections."}
+                      : "What is stored, and who agreed."}
               </h1>
-              <p>
-                {mode === "care"
-                  ? "Possible changes from a resident’s usual movement appear here. A person decides what happens next."
-                  : "Possible changes from your usual movement appear here. You choose who is told and when."}
-              </p>
+              {page === "overview" && (
+                <p>
+                  {mode === "care"
+                    ? "Possible changes from a resident’s usual movement appear here. A person decides what happens next."
+                    : "Possible changes from your usual movement appear here. You choose who is told and when."}
+                </p>
+              )}
             </div>
-            <button className="secondary" onClick={() => setEditing(true)}>
-              <Settings2 size={16} /> Edit profile
-            </button>
           </div>
           {error && (
             <div className="banner error" role="alert">
@@ -464,39 +404,6 @@ export default function App() {
           </div>
           {page === "overview" && (
             <>
-              <div className="summary-grid">
-                <div className="summary-card">
-                  <span>
-                    {mode === "care" ? "Residents" : "Capture"}
-                  </span>
-                  <strong>
-                    {mode === "care"
-                      ? profiles.filter((p) => p.mode === "care").length
-                      : stream?.online
-                        ? "Active"
-                        : "Paused"}
-                    <small>
-                      {mode === "care" ? "in Care mode" : "camera status"}
-                    </small>
-                  </strong>
-                </div>
-                <div className="summary-card">
-                  <span>For review</span>
-                  <strong>
-                    {active.length}
-                    <small>open event{active.length !== 1 ? "s" : ""}</small>
-                  </strong>
-                </div>
-                <div className="summary-card">
-                  <span>Contacts</span>
-                  <strong>
-                    {profile.contacts?.length || 0}
-                    <small>
-                      in the {mode === "care" ? "care team" : "trusted circle"}
-                    </small>
-                  </strong>
-                </div>
-              </div>
               {checkIn && (
                 <div className="check-in">
                   <div>
@@ -504,15 +411,36 @@ export default function App() {
                     <h2>Are you feeling okay, {profile.alias}?</h2>
                     <p>
                       Hayvn noticed a possible change from your usual movement.
-                      If you do not respond, your circle is told.
+                      {checkIn.next_escalation_at
+                        ? ` If you do not respond in ${Math.max(0, Math.ceil(checkIn.next_escalation_at - now))} s, ${firstContact?.name || "your trusted circle"} is told.`
+                        : " If you do not respond, your circle is told."}
                     </p>
                   </div>
                   <button
                     className="primary"
                     onClick={() => acknowledge(checkIn.id)}
                   >
-                    <Check size={18} /> I’m okay
+                    I’m okay
                   </button>
+                </div>
+              )}
+              {told && (
+                <div className="told-card" role="status">
+                  <span className="eyebrow">TRUSTED CIRCLE</span>
+                  {told.status === "acknowledged" ? (
+                    <>
+                      <h2>{told.acknowledged_by} responded.</h2>
+                      <p>Further alerts for this event have stopped.</p>
+                    </>
+                  ) : (
+                    <>
+                      <h2>{firstSend?.recipient} was told.</h2>
+                      <p>
+                        No call or message was needed from you. Waiting for a
+                        response.
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
               <div className="content-grid">
@@ -527,8 +455,10 @@ export default function App() {
                   <section className="panel recent-panel">
                     <div className="panel-heading">
                       <div>
-                        <span className="eyebrow">EVENT LOG</span>
-                        <h2>Recent events</h2>
+                        <span className="eyebrow">FOR REVIEW</span>
+                        <h2>
+                          {mode === "care" ? "For review now" : "Open signals"}
+                        </h2>
                       </div>
                       <button
                         className="text-button"
@@ -538,8 +468,12 @@ export default function App() {
                       </button>
                     </div>
                     <EventList
-                      events={current.slice(0, 4)}
+                      events={review}
                       onSelect={setDetail}
+                      empty={[
+                        "No open signals.",
+                        "Replay a demo scenario or start the camera.",
+                      ]}
                     />
                   </section>
                 </div>
@@ -547,9 +481,7 @@ export default function App() {
                   <section className="panel person-panel">
                     <div className="panel-heading">
                       <span className="eyebrow">
-                        {mode === "care"
-                          ? "RESIDENT"
-                          : "YOUR PROFILE"}
+                        {mode === "care" ? "RESIDENT" : "YOUR PROFILE"}
                       </span>
                       <button
                         className="icon-button"
@@ -559,25 +491,24 @@ export default function App() {
                         <Settings2 size={16} />
                       </button>
                     </div>
-                    <div className="person-avatar">{profile.alias[0]}</div>
                     <h2>{profile.alias}</h2>
                     <p>
                       {profile.age} years ·{" "}
                       {mode === "care" ? "Care mode" : "Personal mode"}
                     </p>
-                    <select
-                      aria-label="Selected profile"
-                      value={profile.id}
-                      onChange={(e) => setPersonId(e.target.value)}
-                    >
-                      {profiles
-                        .filter((p) => p.mode === mode)
-                        .map((p) => (
+                    {sameMode.length > 1 && (
+                      <select
+                        aria-label="Selected profile"
+                        value={profile.id}
+                        onChange={(e) => setPersonId(e.target.value)}
+                      >
+                        {sameMode.map((p) => (
                           <option key={p.id} value={p.id}>
                             {p.alias}
                           </option>
                         ))}
-                    </select>
+                      </select>
+                    )}
                     <div className="person-status">
                       <span className={`dot ${stream?.online ? "" : "grey"}`} />
                       {stream?.online
@@ -590,13 +521,11 @@ export default function App() {
                     </div>
                     <div className="profile-details">
                       <span className="eyebrow">CARE CONTEXT</span>
-                      <div className="rule-tags">
-                        {profile.conditions?.map((c) => (
-                          <span className="tag" key={c}>
-                            {c}
-                          </span>
-                        ))}
-                      </div>
+                      {Boolean(profile.conditions?.length) && (
+                        <p className="conditions">
+                          {profile.conditions?.join(" · ")}
+                        </p>
+                      )}
                       <p>
                         <strong>
                           {profile.mobility_aid === "none"
@@ -605,7 +534,7 @@ export default function App() {
                         </strong>
                         <span>
                           {profile.restrict_night_standing
-                            ? "Standing without a helper in quiet hours is flagged"
+                            ? `Standing without a helper from ${hour(profile.quiet_start)} to ${hour(profile.quiet_end)} is flagged`
                             : "No quiet-hours standing rule"}
                         </span>
                       </p>
@@ -613,31 +542,17 @@ export default function App() {
                         <strong>
                           {profile.check_in_first
                             ? "Check in with me first"
-                            : "Notify the care team"}
+                            : `${mode === "care" ? "Care team" : "Trusted circle"} is told directly`}
                         </strong>
                         <span>
                           {profile.check_in_first
-                            ? `Level 1 response window: ${profile.check_in_seconds}s`
-                            : "Signals go to contacts without a check-in"}
+                            ? `If there is no answer in ${profile.check_in_seconds} s, ${firstContact?.name || `the ${team}`} is told.`
+                            : `${firstContact?.name || "Nobody"} is told first.`}
                         </span>
                       </p>
                     </div>
                   </section>
-                  <section className="support-card">
-                    <h3>Who is told first</h3>
-                    <p>
-                      {profile.contacts?.[0]?.name || "Nobody"} is first
-                      in the {mode === "care" ? "care team" : "trusted circle"}.
-                    </p>
-                    <button
-                      className="text-button"
-                      onClick={() => setPage("circle")}
-                    >
-                      View the contact order
-                    </button>
-                  </section>
                   <div className="small-note">
-                    <CircleHelp size={16} />
                     <span>
                       Low visibility is shown as uncertain. Uncertain does not
                       mean the person is okay.
@@ -651,74 +566,67 @@ export default function App() {
             <section className="panel">
               <div className="panel-heading">
                 <h2>Event history</h2>
-                <span className="pill">{events.length} events</span>
+                <span className="muted">{events.length} events</span>
               </div>
-              <EventList events={events} onSelect={setDetail} />
+              <EventList
+                events={events}
+                onSelect={setDetail}
+                empty={[
+                  "No events yet.",
+                  "Start the camera or replay a labelled demo scenario.",
+                ]}
+              />
             </section>
           )}
           {page === "circle" && (
-            <section className="panel circle-panel">
-              <div className="panel-heading">
-                <h2>
-                  {profile.alias}’s{" "}
-                  {mode === "care" ? "care team" : "trusted circle"}
-                </h2>
-                <button className="secondary" onClick={subscribe}>
-                  <Bell size={16} /> Subscribe this browser
-                </button>
-              </div>
-              <p className="muted">
-                The first push contact is assigned to this browser when you
-                subscribe. Level 3 alerts reach all eligible contacts
-                immediately.
-              </p>
-              {profile.contacts?.map((c, i) => (
-                <div className="circle-row" key={c.id}>
-                  <span className="circle-order">{i + 1}</span>
-                  <div>
-                    <h3>{c.name}</h3>
-                    <p>
-                      {c.role} ·{" "}
-                      {c.channel === "call" ? "Phone call" : "Browser push"}
-                    </p>
-                  </div>
-                  <span className="pill">Level {c.min_urgency}+</span>
-                  <span className="muted">
-                    {c.delay_seconds
-                      ? `After ${c.delay_seconds}s`
-                      : "Immediately"}
-                  </span>
+            <>
+              <section className="panel circle-panel">
+                <div className="panel-heading">
+                  <h2>
+                    {profile.alias}’s {team}
+                  </h2>
+                  {config.push_public_key && (
+                    <button className="secondary" onClick={subscribe}>
+                      Subscribe this browser
+                    </button>
+                  )}
                 </div>
-              ))}
-              <button className="text-button" onClick={() => setEditing(true)}>
-                Edit contacts and escalation
-              </button>
-            </section>
-          )}
-          {page === "setup" && (
-            <div className="setup-grid">
+                <p className="muted">
+                  Contacts are told in this order. Urgent signals reach every
+                  eligible contact at once.
+                </p>
+                {profile.contacts?.map((c, i) => (
+                  <div className="circle-row" key={c.id}>
+                    <span className="circle-order">{i + 1}</span>
+                    <div>
+                      <h3>{c.name}</h3>
+                      <p>
+                        {c.role} ·{" "}
+                        {c.channel === "call" ? "Phone call" : "Browser push"}
+                      </p>
+                    </div>
+                    <span>{urgencyNames[c.min_urgency]} and above</span>
+                    <span className="muted">
+                      {c.delay_seconds
+                        ? `After ${duration(c.delay_seconds)}`
+                        : "Immediately"}
+                    </span>
+                  </div>
+                ))}
+                <button className="text-button" onClick={() => setEditing(true)}>
+                  Edit contacts and escalation
+                </button>
+              </section>
               <section className="panel">
                 <span className="eyebrow">DEMO PHONE</span>
-                <h2>Test the demo call.</h2>
+                <h2>Test the phone call.</h2>
                 <p>
-                  Request a short call to the configured personal phone. If
-                  answered, it hangs up without speaking.
+                  Rings the configured phone and hangs up without speaking. 1
+                  call per event, 5 calls per day, 5 min apart.
+                  {config.calls_configured
+                    ? ""
+                    : " Simulated until Voice credentials are set."}
                 </p>
-                <div className="setup-status">
-                  <Phone />
-                  <div>
-                    <strong>
-                      {config.calls_configured
-                        ? "Voice configured"
-                        : "Voice credentials pending"}
-                    </strong>
-                    <p>
-                      {config.notification_mode === "dry_run"
-                        ? "Simulation mode — no real call will be made."
-                        : "Live mode — requests are limited and allowlisted."}
-                    </p>
-                  </div>
-                </div>
                 <button
                   className="primary"
                   disabled={callBusy}
@@ -731,62 +639,8 @@ export default function App() {
                       ? "Simulate demo call"
                       : "Ring demo phone"}
                 </button>
-                <p className="muted">
-                  1 call per event. 5 calls per day and a 5 min cooldown by
-                  default. SMS is outside the current scope.
-                </p>
               </section>
-              <section className="panel">
-                <span className="eyebrow">CONNECTIONS</span>
-                <h2>Check each connection.</h2>
-                <button
-                  className="secondary small"
-                  onClick={checkPose}
-                  disabled={checkingPose}
-                >
-                  {checkingPose ? "Checking pose model…" : "Check pose model"}
-                </button>
-                <dl className="metrics-list">
-                  <div>
-                    <dt>Persistence</dt>
-                    <dd>{config.database}</dd>
-                  </div>
-                  <div>
-                    <dt>Gemini</dt>
-                    <dd>
-                      {config.gemini_configured
-                        ? "Configured"
-                        : "Pending credentials"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Browser push</dt>
-                    <dd>
-                      {config.push_public_key ? "Configured" : "Pending keys"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Tiger Data budget</dt>
-                    <dd>
-                      ${config.tiger_budget_limit.toLocaleString()} maximum
-                    </dd>
-                  </div>
-                </dl>
-                <p className="muted">
-                  Cloud deployment is pending credentials. The budget shown is a
-                  planning constraint, not a provider billing cap.
-                </p>
-                <div className="privacy-callout">
-                  <span>
-                    The server receives skeletons; raw video stays on the
-                    capture device. Seeded example profiles are synthetic.
-                  </span>
-                </div>
-              </section>
-            </div>
-          )}
-          {page === "trends" && (
-            <TrendsPanel profile={profile} onError={setError} />
+            </>
           )}
           {page === "privacy" && (
             <PrivacyPanel
@@ -795,12 +649,8 @@ export default function App() {
               onChange={() => void refresh()}
             />
           )}
-          {page === "evidence" && <EvidencePanel onError={setError} />}
           <footer className="workspace-footer">
-            <span>
-              <img className="footer-mark" src="/brand/hayvn-mark.png" alt="" />
-              Hayvn
-            </span>
+            <span>Hayvn</span>
             <span>Demonstration build · Not a medical device</span>
             <span>Supports care staff. Does not replace them.</span>
           </footer>
@@ -829,28 +679,23 @@ export default function App() {
 function EventList({
   events,
   onSelect,
+  empty,
 }: {
   events: GuardianEvent[];
   onSelect: (id: string) => void;
+  empty: [string, string];
 }) {
   if (!events.length)
     return (
       <div className="empty-events">
-        <h3>No events yet.</h3>
-        <p>Start the camera or replay a labelled demo scenario.</p>
+        <h3>{empty[0]}</h3>
+        <p>{empty[1]}</p>
       </div>
     );
   return (
     <div className="event-list">
       {events.map((e) => (
         <button className="event-row" key={e.id} onClick={() => onSelect(e.id)}>
-          <span className={`event-symbol urgency-${e.urgency}`}>
-            {e.status === "acknowledged" ? (
-              <Check size={18} />
-            ) : (
-              <Activity size={18} />
-            )}
-          </span>
           <div>
             <strong>
               {e.alias} ·{" "}
@@ -858,10 +703,23 @@ function EventList({
             </strong>
             <p>{e.summary}</p>
             <small>
-              {timeLabel(e.opened_at)} · {pretty(e.source)} · {pretty(e.status)}
+              {timeLabel(e.observed_at)} ·{" "}
+              {e.source === "replay"
+                ? "Synthetic replay"
+                : e.source === "demo_call"
+                  ? "Demo call"
+                  : "Camera"}{" "}
+              ·{" "}
+              {e.status === "acknowledged"
+                ? `Acknowledged by ${e.acknowledged_by}`
+                : e.status === "dismissed"
+                  ? "Dismissed"
+                  : "Open"}
             </small>
           </div>
-          <span className={`pill urgency-${e.urgency}`}>
+          <span
+            className={e.status === "open" ? `pill urgency-${e.urgency}` : "pill"}
+          >
             {urgencyNames[e.urgency]}
           </span>
           <ChevronRight size={16} />

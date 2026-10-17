@@ -5,8 +5,6 @@ import {
   MonitorSmartphone,
   Pause,
   Play,
-  Radio,
-  Download,
 } from "lucide-react";
 import {
   api,
@@ -19,13 +17,21 @@ import {
   uid,
 } from "./api";
 import { Skeleton } from "./Skeleton";
-import { BaselinePanel } from "./Experience";
-import { ActionPanel } from "./ActionPanel";
 
 const center = (p: Landmark[]) => ({
   x: (p[23].x + p[24].x) / 2,
   y: (p[23].y + p[24].y) / 2,
 });
+
+const SCENARIOS: [string, string][] = [
+  ["stumble", "Stumble"],
+  ["fall", "Fall"],
+  ["long_lie", "Fall, then still"],
+  ["restricted_standing", "Standing without a helper at night"],
+  ["bed_exit", "Bed exit at night"],
+  ["normal", "Ordinary movement"],
+  ["low_visibility", "Low visibility"],
+];
 
 export function Capture({
   profile,
@@ -41,19 +47,17 @@ export function Capture({
   const [poses, setPoses] = useState<Landmark[][]>([]),
     [running, setRunning] = useState(false),
     [preview, setPreview] = useState(false);
-  const [modelStream, setModelStream] = useState<string | null>(null);
   const [selected, setSelected] = useState(-1),
     [status, setStatus] = useState("Camera is paused"),
     [result, setResult] = useState<IngestResult | null>(null);
   const [scenario, setScenario] = useState("stumble"),
-    [source, setSource] = useState(""),
-    [calibrating, setCalibrating] = useState(false);
+    [source, setSource] = useState("");
   const video = useRef<HTMLVideoElement>(null),
     worker = useRef<Worker | null>(null),
     media = useRef<MediaStream | null>(null);
   const [timeScale, setTimeScale] = useState(8),
     [simulatedAt, setSimulatedAt] = useState<number | null>(null);
-  const [region, setRegion] = useState({
+  const [region] = useState({
     x1: 0.15,
     y1: 0.05,
     x2: 0.85,
@@ -73,7 +77,6 @@ export function Capture({
     chosen = useRef<{ x: number; y: number } | null>(null),
     lost = useRef(false);
   const session = useRef(uid()),
-    recording = useRef<PoseFrame[]>([]),
     timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const replayTime = useRef(0),
     lastVideoTime = useRef(-1),
@@ -128,7 +131,6 @@ export function Capture({
     lost.current = false;
     setSelected(index);
     session.current = uid();
-    recording.current = [];
     socket();
     setRunning(true);
     setStatus("Tracking selected person");
@@ -136,8 +138,6 @@ export function Capture({
   const startVideo = async (file?: File) => {
     stop();
     setResult(null);
-    setModelStream(null);
-    recording.current = [];
     setSimulatedAt(null);
     try {
       setStatus("Loading local pose model…");
@@ -226,8 +226,6 @@ export function Capture({
           demo_time_scale: 1,
         };
         sock.current.send(frame);
-        setModelStream(`${frame.person_id}:${frame.camera_id}:${frame.session_id}`);
-        if (recording.current.length < 18000) recording.current.push(frame);
       };
       worker.current.postMessage({ type: "init" });
       const loop = async () => {
@@ -292,13 +290,11 @@ export function Capture({
         `/demo/scenarios/${scenario}?person_id=${profile.id}&time_scale=${timeScale}`,
       );
       session.current = uid();
-      setModelStream(`${profile.id}:synthetic-demo:${session.current}`);
       socket();
       active.current = true;
       setRunning(true);
       setSource("Synthetic skeleton replay");
       sourceRef.current = "replay";
-      recording.current = frames;
       let i = 0;
       const tick = () => {
         if (!active.current) return;
@@ -332,36 +328,9 @@ export function Capture({
       stop();
     }
   };
-  const download = () => {
-    const a = document.createElement("a"),
-      url = URL.createObjectURL(
-        new Blob(
-          [
-            JSON.stringify({
-              kind: "skeleton-recording",
-              source: sourceRef.current,
-              frames: recording.current,
-            }),
-          ],
-          { type: "application/json" },
-        ),
-      );
-    a.href = url;
-    a.download = `${profile.id}-skeleton-recording.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-  const calibration = async () => {
-    try {
-      await api(
-        `/calibration/${profile.id}/${calibrating ? "stop" : "start"}`,
-        "POST",
-      );
-      setCalibrating(!calibrating);
-    } catch (e) {
-      onError(String(e));
-    }
-  };
+  const trunk = result?.features?.trunk_angle,
+    helper = result?.features?.helper_present,
+    still = result?.features?.still_seconds;
   return (
     <section className="panel capture-panel">
       <div className="panel-heading">
@@ -370,7 +339,6 @@ export function Capture({
           <h2>Only body landmarks leave this device.</h2>
         </div>
         <span className={`pill ${running ? "green" : ""}`}>
-          <Radio size={13} />
           {running ? "Monitoring" : "Paused"}
         </span>
       </div>
@@ -421,9 +389,11 @@ export function Capture({
             <span className="dot" />
             {source || "Capture device"}
           </span>
-          <span className="camera-label">
-            <MonitorSmartphone size={13} /> On-device video
-          </span>
+          {source !== "Synthetic skeleton replay" && (
+            <span className="camera-label">
+              <MonitorSmartphone size={13} /> On-device video
+            </span>
+          )}
         </div>
         <div className="camera-bottom">
           <span>{status}</span>
@@ -472,44 +442,7 @@ export function Capture({
             }}
           />
         </label>
-        <button
-          className="icon-button"
-          title="Download skeleton recording"
-          aria-label="Download skeleton recording"
-          disabled={!recording.current.length}
-          onClick={download}
-        >
-          <Download size={18} />
-        </button>
       </div>
-      <details className="calibration">
-        <summary>
-          Monitored area · bystanders masked before pose estimation
-        </summary>
-        <p>
-          Only people whose hip center is inside this area are tracked or
-          considered helpers. Pixels outside it are masked before MediaPipe. A
-          partially visible person at the boundary can still be detected; keep
-          the demo area clear.
-        </p>
-        <div className="roi-inputs">
-          {(["x1", "y1", "x2", "y2"] as const).map((k) => (
-            <label key={k}>
-              {k}
-              <input
-                aria-label={`Monitored area ${k}`}
-                type="number"
-                min="0"
-                max="1"
-                step="0.05"
-                value={region[k]}
-                disabled={running || preview}
-                onChange={(e) => setRegion({ ...region, [k]: +e.target.value })}
-              />
-            </label>
-          ))}
-        </div>
-      </details>
       {config.demo_enabled && (
         <div className="replay-controls">
           <div>
@@ -521,19 +454,9 @@ export function Capture({
             value={scenario}
             onChange={(e) => setScenario(e.target.value)}
           >
-            {[
-              "stumble",
-              "fall",
-              "long_lie",
-              "normal",
-              "restricted_standing",
-              "assisted_standing",
-              "sway",
-              "bed_exit",
-              "low_visibility",
-            ].map((s) => (
-              <option key={s} value={s}>
-                {s.replaceAll("_", " ")}
+            {SCENARIOS.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
               </option>
             ))}
           </select>
@@ -559,15 +482,18 @@ export function Capture({
         <div className="simulated-clock" role="status">
           <strong>SIMULATED CLOCK · {timeScale}×</strong>
           <span>
-            {new Date(simulatedAt * 1000).toLocaleTimeString("en-CA", {
+            {new Date(simulatedAt * 1000).toLocaleTimeString([], {
               timeZone: profile.timezone,
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+              hourCycle: "h23",
             })}{" "}
             · {profile.timezone}
           </span>
           <span>
-            120s of observed stillness ≈ {120 / timeScale}s of playback.
-            Check-in: {(profile.check_in_seconds || 60) / timeScale}s. Real
-            camera timing stays unchanged.
+            Check-in window: {(profile.check_in_seconds || 60) / timeScale} s.
+            Real camera timing is unchanged.
           </span>
         </div>
       )}
@@ -578,50 +504,21 @@ export function Capture({
         </div>
         <div>
           <span>Trunk angle</span>
-          <strong>{result?.features?.trunk_angle ?? "—"}°</strong>
+          <strong>{trunk != null && trunk !== "" ? `${trunk}°` : "—"}</strong>
         </div>
         <div>
-          <span>Sway</span>
-          <strong>{result?.features?.sway ?? "—"}</strong>
+          <span>Helper nearby</span>
+          <strong>
+            {helper === true ? "Yes" : helper === false ? "No" : "—"}
+          </strong>
         </div>
         <div>
-          <span>Personal baseline z-score</span>
-          <strong>{result?.anomaly_score?.toFixed(2) ?? "Uncalibrated"}</strong>
+          <span>Still for</span>
+          <strong>
+            {typeof still === "number" ? `${Math.round(still)} s` : "—"}
+          </strong>
         </div>
       </div>
-      <ActionPanel prediction={result?.action_prediction} streamId={modelStream} live />
-      {result?.baseline_contributions?.length ? (
-        <div className="baseline-reason">
-          <strong>{result.baseline_state}</strong>
-          <p>
-            Current score: {result.anomaly_score?.toFixed(2)} · frozen anchor
-            score: {result.anchor_score?.toFixed(2)}
-          </p>
-          {result.baseline_contributions.slice(0, 2).map((c, i) => (
-            <p key={i}>
-              {String(c.feature)}: {Number(c.value).toFixed(3)} vs personal
-              median {Number(c.median).toFixed(3)} · z ={" "}
-              {Number(c.z).toFixed(2)}
-            </p>
-          ))}
-        </div>
-      ) : null}
-      <details className="calibration">
-        <summary>Personal calibration · median and MAD</summary>
-        <p>
-          Record separate sessions of ordinary movement, review them as normal,
-          then fit a posture-specific baseline. 3 consecutive windows that
-          differ from usual can open an event, but only after held-out
-          evaluation. A change from usual is not always unsafe.
-        </p>
-        <button className="secondary small" onClick={calibration}>
-          {calibrating ? "Stop calibration" : "Record calibration"}
-        </button>{" "}
-        <a href={`/api/calibration/${profile.id}/export`} className="text-link">
-          Export windows
-        </a>
-        <BaselinePanel profile={profile} onError={onError} />
-      </details>
       {pendingCapture !== undefined && (
         <div className="modal-shade">
           <section
@@ -649,7 +546,7 @@ export function Capture({
                 onChange={(e) => setSendGemini(e.target.checked)}
               />
               Allow sending category flags and skeleton-rendered keyframes to
-              Gemini (requires a confirmed billed project)
+              Gemini
             </label>
             <label className="check-row">
               <input
@@ -657,7 +554,7 @@ export function Capture({
                 checked={showRaw}
                 onChange={(e) => setShowRaw(e.target.checked)}
               />
-              Show raw video on this device only (logged preview override)
+              Show my camera picture on this screen only (logged)
             </label>
             <div className="action-row">
               <button

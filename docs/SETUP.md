@@ -32,7 +32,7 @@ Gemini receives category flags, detector metrics, event history and skeleton-ren
 ## The phone demonstration
 
 1. Configure the Voice fields above and keep `NOTIFICATION_MODE=dry_run` for the first check.
-2. Open **Demo setup → Simulate demo call**. The event timeline must say **simulated**.
+2. Open **Trusted circle → Simulate demo call**. The event timeline must say **simulated**.
 3. Once ready, set live delivery and enable calls; restart. **Ring demo phone** creates one outbound call. A concern/urgent event also queues one call to the configured demo destination.
 4. The request allows about 15 seconds of ringing; if answered, inline `<Response><Hangup/></Response>` ends the call. There is no application speech, recording, or audio stream. Carrier/provider timing may vary.
 5. A successful REST response is labelled **provider accepted**, which does not prove the handset rang. Check the actual phone and provider log. Timeout/crash ambiguity is labelled **unknown** and is not automatically retried.

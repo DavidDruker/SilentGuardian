@@ -7,7 +7,7 @@ Use synthetic profiles and consenting team members. The supplied skeleton scenar
 1. Open **Care** with Margaret. Inspect her night assistance restriction. Replay **stumble**. The scenario timestamp is 02:10 in Toronto; the restriction and stumble share an event thread. The care assistant receives a simulated concern alert.
 2. Open the event, review rule hits and skeleton keyframes, then acknowledge. Pending sends are cancelled and the acknowledgement persists.
 3. Switch to **Personal** with Daniel. Replay the same **stumble**. A level 1 on-screen check-in appears. Press **I'm okay** to stop escalation, or leave it unanswered for the displayed response window (60 seconds at 1×, 7.5 seconds at 8×) to route to the first trusted contact.
-4. Replay **fall**. The rule-based concern opens immediately when the fall rule fires, without waiting for Gemini. Show the phone integration from **Demo setup** (simulated until credentials are configured).
+4. Replay **fall**. The rule-based concern opens immediately when the fall rule fires, without waiting for Gemini. Show the phone integration from the **Trusted circle** page (simulated until credentials are configured).
 5. Open the contact view from event detail on a phone. Its signed link grants only that event's minimal summary and acknowledgement, and expires after seven days. A localhost link needs an appropriate secure, reachable deployment before another device can open it.
 
 ## Real camera and staged clips
@@ -30,7 +30,7 @@ The LSTM implementation has been replaced by robust per-posture median/MAD stati
 
 Use the labelled **8× simulated time** selector for the short rehearsal. **Long lie** supplies 130 seconds of continuous synthetic observations in roughly 16 seconds at target playback speed. A 60-second check-in becomes 7.5 seconds; fixed real-camera timings remain unchanged. The observed nighttime clock is visible. Rehearse actual wall-clock playback on the presentation machine because processing can extend it.
 
-[ADJUSTMENTS.md](ADJUSTMENTS.md) maps the new requirements, privacy controls, rules/Gemini comparison, synthetic Trends example and the evidence limits. **Demonstrate blocked downgrade** is explicitly a simulated proposal, not a real Gemini result. **Confirm event** and **Dismiss as false alarm** log human review. Dismissal stops that event's sends; continued long-lie evidence can open another event with a higher floor.
+[ADJUSTMENTS.md](ADJUSTMENTS.md) maps the new requirements, privacy controls, rules/Gemini comparison and the evidence limits. Event detail is laid out as **What Hayvn noticed**, **What it cannot tell**, **Who was told** and **You decide**. **Real concern** and **False alarm** log human review. Dismissal stops that event's sends; continued long-lie evidence can open another event with a higher floor.
 
 ## Outstanding external acceptance
 

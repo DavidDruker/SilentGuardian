@@ -34,7 +34,7 @@ export function ContactView({ parts }: { parts: string[] }) {
       await api(
         `/contact/${id}/${contact}/ack`,
         "POST",
-        { author: "Contact", note },
+        { author: ev?.contact_name || "Contact", note },
         token,
       );
       await refresh();

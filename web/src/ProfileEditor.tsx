@@ -111,21 +111,6 @@ export function ProfileEditor({
               Consent to Gemini receiving category flags and skeleton-rendered
               keyframes
             </label>
-            <label>
-              Demo data category
-              <select
-                value={p.data_category || "synthetic"}
-                onChange={(e) =>
-                  field(
-                    "data_category",
-                    e.target.value as Profile["data_category"],
-                  )
-                }
-              >
-                <option value="synthetic">Synthetic profile</option>
-                <option value="consenting_teammate">Consenting teammate</option>
-              </select>
-            </label>
           </fieldset>
           <div className="form-grid">
             <label>
@@ -146,18 +131,6 @@ export function ProfileEditor({
                 value={p.age}
                 onChange={(e) => field("age", +e.target.value)}
               />
-            </label>
-            <label>
-              Mode
-              <select
-                value={p.mode}
-                onChange={(e) =>
-                  field("mode", e.target.value as Profile["mode"])
-                }
-              >
-                <option value="care">Care</option>
-                <option value="personal">Personal</option>
-              </select>
             </label>
             <label>
               Mobility aid
@@ -217,13 +190,6 @@ export function ProfileEditor({
                 onChange={(e) => field("quiet_end", +e.target.value)}
               />
             </label>
-            <label className="span2">
-              Time zone
-              <input
-                value={p.timezone}
-                onChange={(e) => field("timezone", e.target.value)}
-              />
-            </label>
             <label className="check span2">
               <input
                 type="checkbox"
@@ -262,47 +228,6 @@ export function ProfileEditor({
                 onChange={(e) => field("retain_days", +e.target.value)}
               />
             </label>
-            <label className="check span2">
-              <input
-                type="checkbox"
-                checked={Boolean(p.bed_zone)}
-                onChange={(e) =>
-                  field(
-                    "bed_zone",
-                    e.target.checked
-                      ? { x1: 0.05, y1: 0.25, x2: 0.35, y2: 0.95 }
-                      : null,
-                  )
-                }
-              />{" "}
-              Enable a bed zone for this camera
-            </label>
-            {p.bed_zone && (
-              <div className="span2 zone-fields">
-                {(["x1", "y1", "x2", "y2"] as const).map((k) => (
-                  <label key={k}>
-                    {k}
-                    <input
-                      type="number"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={p.bed_zone![k]}
-                      onChange={(e) =>
-                        field("bed_zone", {
-                          ...p.bed_zone!,
-                          [k]: +e.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                ))}
-                <small>
-                  Normalized corners: top-left (0,0), bottom-right (1,1).
-                  Calibrate to your camera.
-                </small>
-              </div>
-            )}
             <label className="check span2">
               <input
                 type="checkbox"
@@ -440,7 +365,7 @@ export function ProfileEditor({
           ))}
           <p className="muted">
             The server stores body landmarks, not video. Camera video stays on
-            the capture device. Walker recognition is outside this demo.
+            the capture device.
           </p>
           {error && (
             <div role="alert" className="error">

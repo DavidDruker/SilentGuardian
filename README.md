@@ -10,9 +10,9 @@ Requires Python 3.11+ and Node 20.19+ (Node 24 recommended). From this repositor
 python scripts/dev.py
 ```
 
-The launcher installs dependencies and the official MediaPipe model on first run, builds the UI, and serves **http://localhost:8000**. Choose **Explore the local demo**. Later source edits can be rebuilt with `python scripts/dev.py --build`. Stop with Ctrl+C. Local data persists in ignored `data/guardian.db`.
+The launcher installs dependencies and the official MediaPipe model on first run, builds the UI, and serves **http://localhost:8000**. Choose **Open the local demo**. Later source edits can be rebuilt with `python scripts/dev.py --build`. Stop with Ctrl+C. Local data persists in ignored `data/guardian.db`.
 
-Two seeded synthetic profiles: Margaret in Care mode and Daniel in Personal mode. Replay **stumble** in both to see direct care-team routing versus a personal check-in. Open event detail to acknowledge, inspect evidence, or open the limited trusted-contact view. **Demo setup** includes a ring-only phone test; delivery is simulated until configured. SMS is not included.
+Two seeded synthetic profiles: Margaret in Care mode and Daniel in Personal mode. Replay **stumble** in both to see direct care-team routing versus a personal check-in. Open event detail to acknowledge, inspect evidence, or open the limited trusted-contact view. The **Care team** / **Trusted circle** page includes a ring-only phone test; delivery is simulated until configured. SMS is not included.
 
 ## Configuration and current limits
 
@@ -24,13 +24,13 @@ Live video stays on the browser. Two poses can be detected; the selected subject
 
 Personalization uses an explainable median/MAD baseline per posture, a frozen calibration anchor, per-feature contributions and an evaluated three-window persistence gate. It remains score-only until held-out staged evidence passes. [Baseline collection and evaluation](docs/BASELINE.md) documents its assumptions and feature proxies. No trained baseline or clinical performance is claimed.
 
-The [October 17 adjustments](docs/ADJUSTMENTS.md) also add an 8× simulated replay clock, monitored-area masking, consent/pause/delete controls, human Confirm/Dismiss actions, a rules/Gemini comparison, synthetic drift trends and an on-screen evidence page.
+The [October 17 adjustments](docs/ADJUSTMENTS.md) also add an 8× simulated replay clock, monitored-area masking, consent/pause/delete controls, human Real concern/False alarm review, and a rules/Gemini second-assessment status in event detail. The synthetic Trends and Evidence screens were removed from the demo UI; their APIs and the measured limits remain in the docs.
 
 ## Verify
 
 The optional **ST-GCN++ backend classifier** runs in shadow mode with official
 pretrained weights. Use `python scripts/dev.py --with-action-model --build` to
-install it. Capture and event details show learned action scores alongside rules;
+install it. Event detail shows the learned falling and staggering scores beside the rules;
 model predictions do not yet control alerts. [Model setup and evaluation](docs/ACTION_MODEL.md)
 documents the adapter, CPU runtime, licensing and validation limits.
 

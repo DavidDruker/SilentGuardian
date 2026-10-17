@@ -30,9 +30,8 @@ export function Skeleton({
       {poses.map((pose, i) => (
         <g
           key={i}
-          stroke={i === selected ? "#8cc1ea" : "#6f7f96"}
-          fill={i === selected ? "#ffffff" : "#6f7f96"}
-          opacity={i === selected ? 1 : 0.6}
+          stroke={i === selected ? "#8cc1ea" : "#d9e1eb"}
+          fill={i === selected ? "#ffffff" : "#d9e1eb"}
         >
           {edges.map(
             ([a, b]) =>
