@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Plus, Save, Trash2, X } from "lucide-react";
-import { api, type Profile } from "./api";
+import { api, type Profile, uid } from "./api";
 
 export function ProfileEditor({
   profile,
@@ -321,7 +321,7 @@ export function ProfileEditor({
                 field("contacts", [
                   ...(p.contacts || []),
                   {
-                    id: crypto.randomUUID(),
+                    id: uid(),
                     name: "New contact",
                     role: "Trusted circle",
                     channel: "push",

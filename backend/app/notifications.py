@@ -72,61 +72,87 @@ class NotificationWorker:
 
     def send(self, nid):
         g, now = self.g, self.g.clock()
-        # Serialize ack and send. A send already in flight finishes before ack commits;
-        # no new send starts after acknowledgement. Provider delivery is at-least-once.
+        with g.db.sessions() as s:
+            n = s.get(Notification, nid)
+            if n is None:
+                return
+            event_id = n.event_id
+        # Serialize ack and send per event. A send already in flight finishes before ack
+        # commits; no new send starts after acknowledgement. Provider delivery is
+        # at-least-once. Only the event lock is held during provider I/O, so frame
+        # ingest and other events never wait on a slow push or call.
+        with g.event_lock(event_id):
+            job = self.claim(nid, now)
+            if job is None:
+                return
+            result, error = None, None
+            try:
+                result = self.delivery.call(job[1]) if job[0] == 'call' else self.delivery.push(job[1], job[2])
+            except Exception as exc:
+                error = exc
+            self.record(nid, job[0], result, error, now)
+
+    def claim(self, nid, now):
+        """Validates and reserves a notification under the DB lock; returns the provider job, if any."""
+        g = self.g
         with g.db.lock, g.db.sessions.begin() as s:
             n = s.get(Notification, nid, with_for_update=True)
+            if n is None or n.state not in ('pending', 'retry'):
+                return None
             ev = s.get(Event, n.event_id, with_for_update=True)
-            if n.state not in ('pending', 'retry'):
-                return
-            if ev.status != 'open':
+            if ev is None or ev.status != 'open':
                 n.state = 'cancelled'
-                return
+                return None
             n.attempts += 1
             if g.settings.notification_mode == 'dry_run':
                 n.state, n.sent_at = 'simulated', now
-                return
-            try:
-                if n.channel == 'call':
-                    day_start = datetime.fromtimestamp(now, timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-                    calls = list(s.scalars(select(Notification).where(Notification.channel == 'call', Notification.sent_at >= day_start, Notification.state.in_(['provider_accepted', 'unknown']))))
-                    if len(calls) >= g.settings.call_daily_limit or any(now-c.sent_at < g.settings.call_cooldown_seconds for c in calls):
-                        n.state, n.last_error = 'suppressed', 'Demo call cooldown or daily limit reached'
-                        return
-                    target = g.settings.demo_call_to if n.contact_id == 'demo_phone' else next(c['phone'] for c in ev.profile['contacts'] if c['id'] == n.contact_id)
-                    # Commit a reservation before making a non-idempotent call request.
-                    # If the process crashes, do not call again automatically.
-                    n.state, n.sent_at = 'unknown', now
-                    s.flush()
-                    s.commit()
-                    sid = self.delivery.call(target)
-                    with g.db.sessions.begin() as saved:
-                        row = saved.get(Notification, nid)
-                        row.state, row.provider_id = 'provider_accepted', sid
-                    return
-                sub = s.scalar(select(PushSubscription).where(PushSubscription.person_id == ev.person_id, PushSubscription.contact_id == n.contact_id))
-                if not sub:
-                    raise ValueError('No browser subscribed for this contact')
-                token = contact_token(g.settings.signing_secret, ev.id, n.contact_id)
-                payload = {'title': f'Silent Guardian · Level {ev.urgency}', 'event_id': ev.id,
-                           'body': f"{ev.profile['alias']}: a movement event needs a check.",
-                           'url': f'{g.settings.public_url}/#contact/{ev.id}/{n.contact_id}/{token}'}
-                self.delivery.push(sub.body, payload)
-                n.state, n.sent_at = 'provider_accepted', now
-            except Exception as exc:
-                # Error classes only: provider exceptions can contain phone numbers or secrets.
-                if n.channel == 'call':
-                    with g.db.sessions.begin() as saved:
-                        row = saved.get(Notification, nid)
-                        row.last_error = f'{type(exc).__name__}: inspect provider call log before retrying'
-                        row.state = 'configuration_required' if isinstance(exc, ValueError) else 'unknown'
-                        if isinstance(exc, ValueError):
-                            row.sent_at = None
-                            row.last_error = str(exc)
-                    return
-                n.last_error = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
-                n.state = 'retry'
+                return None
+            if n.channel == 'call':
+                day_start = datetime.fromtimestamp(now, timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+                calls = list(s.scalars(select(Notification).where(Notification.channel == 'call', Notification.sent_at >= day_start, Notification.state.in_(['provider_accepted', 'unknown']))))
+                if len(calls) >= g.settings.call_daily_limit or any(now-c.sent_at < g.settings.call_cooldown_seconds for c in calls):
+                    n.state, n.last_error = 'suppressed', 'Demo call cooldown or daily limit reached'
+                    return None
+                target = g.settings.demo_call_to if n.contact_id == 'demo_phone' else next((c.get('phone') for c in ev.profile['contacts'] if c['id'] == n.contact_id), None)
+                if target is None:
+                    n.state, n.last_error = 'configuration_required', 'No phone number for this contact'
+                    return None
+                # Commit a reservation before making a non-idempotent call request.
+                # If the process crashes, do not call again automatically.
+                n.state, n.sent_at = 'unknown', now
+                return ('call', target)
+            sub = s.scalar(select(PushSubscription).where(PushSubscription.person_id == ev.person_id, PushSubscription.contact_id == n.contact_id))
+            if not sub:
+                n.last_error, n.state = 'No browser subscribed for this contact', 'retry'
                 n.due_at = now+min(300, 15*2**min(n.attempts, 4))
+                return None
+            token = contact_token(g.settings.signing_secret, ev.id, n.contact_id)
+            payload = {'title': f'Silent Guardian · Level {ev.urgency}', 'event_id': ev.id,
+                       'body': f"{ev.profile['alias']}: a movement event needs a check.",
+                       'url': f'{g.settings.public_url}/#contact/{ev.id}/{n.contact_id}/{token}'}
+            return ('push', sub.body, payload)
+
+    def record(self, nid, channel, result, error, now):
+        g = self.g
+        with g.db.lock, g.db.sessions.begin() as s:
+            n = s.get(Notification, nid, with_for_update=True)
+            if n is None:
+                return  # Purged while the provider request was in flight.
+            # Error classes only: provider exceptions can contain phone numbers or secrets.
+            if channel == 'call':
+                if error is None:
+                    n.state, n.provider_id = 'provider_accepted', result
+                elif isinstance(error, ValueError):
+                    n.state, n.sent_at, n.last_error = 'configuration_required', None, str(error)
+                else:
+                    n.state, n.last_error = 'unknown', f'{type(error).__name__}: inspect provider call log before retrying'
+                return
+            if error is None:
+                n.state, n.sent_at = 'provider_accepted', now
+                return
+            n.last_error = str(error) if isinstance(error, ValueError) else type(error).__name__
+            n.state = 'retry'
+            n.due_at = now+min(300, 15*2**min(n.attempts, 4))
 
 
 def queue_demo_call(guardian, request_id):

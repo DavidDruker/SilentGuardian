@@ -79,6 +79,8 @@ def register_adjustment_routes(app, g, operator):
             p.body = Profile(id=person_id, version=p.version, mode=p.body['mode'], alias='Deleted profile',
                              consent=False, contacts=[], conditions=[], care_notes='').model_dump()
             g.calibrating.discard(person_id)
+            g.actions.clear_person(person_id)
+            g.forget_streams(person_id)
         aggregate_state = 'not applicable (local SQLite)'
         if db.engine.dialect.name == 'postgresql':
             try:

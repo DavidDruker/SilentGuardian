@@ -60,7 +60,10 @@ Export an actual camera/local-video session directly from retained rows (use its
 
 The script selects the smallest threshold from 3.5 to 20 in increments of 0.5 that meets the tuning false-alert target. The default engineering target is at most two false alert episodes/hour; change it explicitly with `--max-false-per-hour`. Held-out gating requires the same target, at least 80% abnormal-clip recall, ten abnormal clips, sufficient observed normal duration, and two people/two angles. The score covers the personal baseline only, not total system/fall-detector accuracy. Long gaps do not count as observation exposure. Reports distinguish a persistent episode from individual abnormal windows.
 
-An optional supervised or sequence-model comparison is not implemented or claimed. It would need independent evaluation before replacing this baseline.
+A pretrained ST-GCN++ action classifier now runs separately in shadow mode;
+[ACTION_MODEL.md](ACTION_MODEL.md) describes its comparison tools. It recognizes
+dataset action classes, not an individual's normal movement. It has not been
+fine-tuned or validated on teammate recordings and does not replace this baseline.
 
 ## Trends
 

@@ -73,6 +73,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/action-model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Action Model Status */
+        get: operations["action_model_status_api_action_model_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profiles/{person_id}": {
         parameters: {
             query?: never;
@@ -701,6 +718,10 @@ export interface components {
             baseline_contributions?: {
                 [key: string]: unknown;
             }[];
+            /** Action Prediction */
+            action_prediction?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** Evidence */
         Evidence: {
@@ -756,6 +777,10 @@ export interface components {
              * @default uncalibrated
              */
             baseline_state: string;
+            /** Action Prediction */
+            action_prediction?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** Landmark */
         Landmark: {
@@ -1112,6 +1137,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Profile"][];
+                };
+            };
+        };
+    };
+    action_model_status_api_action_model_get: {
+        parameters: {
+            query?: {
+                stream_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

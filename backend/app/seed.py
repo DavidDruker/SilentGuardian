@@ -9,6 +9,7 @@ def demo_profiles():
                 restrict_night_standing=True, check_in_first=False, bed_zone=BedZone(),
                 risk_categories=['balance_support', 'mobility_support', 'transfer_assistance', 'medication_fall_risk'],
                 care_notes='Synthetic demo profile. Assistance required for night transfers.',
+                gemini_consent=True,
                 contacts=[Contact(id='cna', name='Assigned care assistant', role='Care team', min_urgency=1),
                           Contact(id='nurse', name='Charge nurse', role='Care team', min_urgency=2, delay_seconds=180),
                           Contact(id='family', name='Demo family contact', role='Family', min_urgency=3)]),
@@ -16,6 +17,7 @@ def demo_profiles():
                 conditions=['BPPV', 'Orthostatic hypotension'],
                 risk_categories=['balance_support'],
                 care_notes='Synthetic demo profile. Ask me first when a brief stumble resolves.',
+                gemini_consent=True,
                 contacts=[Contact(id='son', name='Trusted family contact', role='Family', min_urgency=2),
                           Contact(id='neighbour', name='Neighbour', role='Trusted circle', min_urgency=2, delay_seconds=180)])
     ]

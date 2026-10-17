@@ -22,6 +22,14 @@ marker = ROOT/'.venv/guardian-dependencies.sha256'
 if not marker.exists() or marker.read_text() != requirements_hash:
     run([PYTHON,'-m','pip','install','-r','backend/requirements.txt'])
     marker.write_text(requirements_hash)
+if '--with-action-model' in sys.argv:
+    action_hash = hashlib.sha256((ROOT/'backend/requirements-action.txt').read_bytes()).hexdigest()
+    action_marker = ROOT/'.venv/guardian-action-dependencies.sha256'
+    if not action_marker.exists() or action_marker.read_text() != action_hash:
+        run([PYTHON, '-m', 'pip', 'install', '-r', 'backend/requirements-action.txt',
+             '--index-url', 'https://download.pytorch.org/whl/cpu'])
+        action_marker.write_text(action_hash)
+    run([PYTHON, '-m', 'scripts.setup_action_model'])
 if not (ROOT/'web/node_modules').exists():run([NPM,'ci'],ROOT/'web')
 if not (ROOT/'web/public/models/pose_landmarker_lite.task').exists():run([NPM,'run','assets'],ROOT/'web')
 if not (ROOT/'web/dist/index.html').exists() or '--build' in sys.argv:

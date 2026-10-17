@@ -19,6 +19,11 @@ SMS remains excluded. The optional notification is a ring-only call to the expli
 
 ## Organizer question draft — not sent
 
+Later addition: ST-GCN++ inference code and pretrained weights come from
+OpenMMLab and are attributed separately. They are not newly authored event code.
+The learned classifier runs only in shadow mode pending staged evaluation;
+see [ACTION_MODEL.md](ACTION_MODEL.md).
+
 “Our idea and architecture were planned before the event. Implementation, schemas and prompts were authored in our repository with OpenAI Codex assistance. Could you confirm in writing the allowed code-development window, treatment of prior design documents, and the required AI-tool disclosure? We will not submit prior code or blueprint appendices as newly written work.”
 
 No claim that all code was written inside the event window is made until the actual rules and repository timestamps are reconciled. The supplied documents give conflicting submission times. Their suggested earlier target can be used for rehearsal planning only after the event details are verified; no scheduled automation or submission was created.

@@ -8,6 +8,12 @@ from backend.app.config import settings
 from backend.app.db import Database
 
 
+def statements(sql):
+    """Drop comment lines before splitting so a ';' inside a comment cannot break a statement."""
+    code='\n'.join(line for line in sql.splitlines() if not line.lstrip().startswith('--'))
+    return [s.strip() for s in code.split(';') if s.strip()]
+
+
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--apply',action='store_true');args=parser.parse_args()
     if not settings.database_url.startswith('postgresql'):
@@ -24,9 +30,8 @@ def main():
         return
     db.create()
     with db.engine.begin() as conn:
-        sql=Path('deploy/tiger.sql').read_text()
-        for statement in sql.split(';'):
-            if statement.strip():conn.execute(text(statement))
+        for statement in statements(Path('deploy/tiger.sql').read_text()):
+            conn.execute(text(statement))
     print('Hypertable and hourly aggregate created. No paid infrastructure was provisioned by this script.')
 
 

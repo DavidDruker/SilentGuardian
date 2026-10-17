@@ -1,6 +1,9 @@
 services:
   guardian:
-    build: .
+    build:
+      context: .
+      args:
+        WITH_ACTION_MODEL: ${WITH_ACTION_MODEL:-1}
     env_file: .env
     ports:
       - "127.0.0.1:8000:8000"

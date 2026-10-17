@@ -15,4 +15,5 @@ web/tsconfig.tsbuildinfo
 artifacts/
 *.log
 models/*.pt
+models/*.pth
 models/*.json

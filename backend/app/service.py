@@ -1,5 +1,6 @@
 import time
 import json
+import threading
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -8,6 +9,7 @@ from sqlalchemy import delete, select
 from .db import Audit, Event, Notification, Person, ProfileVersion, Stream, Window
 from .detector import evaluate
 from .baseline import BaselineEngine
+from .actions import ActionWorker
 from .schemas import EventOut, IngestResult, NotificationOut, Profile
 from .seed import demo_profiles
 
@@ -42,6 +44,40 @@ class Guardian:
         self.db, self.settings, self.clock = db, settings, clock
         self.calibrating = set()
         self.baseline = BaselineEngine(db)
+        self.actions = ActionWorker(self)
+        self._event_locks, self._event_locks_guard = {}, threading.Lock()
+        # Live per-stream detector state stays in memory (one API worker). The streams
+        # table is a restart checkpoint written at most ~3 times a second, not per frame.
+        self.streams = {}
+
+    def stream_state(self, s, stream_id, person_id):
+        cached = self.streams.get(stream_id)
+        if cached is None:
+            row = s.get(Stream, stream_id)
+            cached = self.streams[stream_id] = {'state': row.state if row else {}, 'person_id': person_id,
+                                                'saved_ts': None, 'uncertain_ts': None}
+        return cached
+
+    def checkpoint_stream(self, s, stream_id, cached, frame_ts, now):
+        if cached['saved_ts'] is not None and 0 <= frame_ts-cached['saved_ts'] < .3:
+            return
+        row = s.get(Stream, stream_id)
+        if row is None:
+            s.add(Stream(id=stream_id, person_id=cached['person_id'], state=cached['state'], updated_at=now))
+        else:
+            row.state, row.updated_at = cached['state'], now
+        cached['saved_ts'] = frame_ts
+
+    def forget_streams(self, person_id=None, older_than=None):
+        with self.db.lock:
+            for key in [k for k, c in self.streams.items() if (person_id and c['person_id'] == person_id)
+                        or (older_than is not None and (c['saved_ts'] or 0) < older_than)]:
+                del self.streams[key]
+
+    def event_lock(self, event_id):
+        """Serializes delivery with acknowledgement per event, so provider I/O never holds the DB lock."""
+        with self._event_locks_guard:
+            return self._event_locks.setdefault(event_id, threading.Lock())
 
     def seed(self):
         with self.db.lock, self.db.sessions.begin() as s:
@@ -65,6 +101,7 @@ class Guardian:
             else:
                 s.add(Person(id=p.id, version=body['version'], body=body))
             s.add(ProfileVersion(person_id=p.id, version=body['version'], body=body, created_at=self.clock()))
+            self.actions.clear_person(p.id)
             return Profile.model_validate(body)
 
     def ingest(self, frame):
@@ -83,15 +120,18 @@ class Guardian:
             p = Profile.model_validate(person.body)
             if not p.consent:
                 raise ValueError('Monitoring consent is paused')
-            stream = s.get(Stream, stream_id, with_for_update=True)
-            if stream is None:
-                stream = Stream(id=stream_id, person_id=p.id, state={}, updated_at=now)
-                s.add(stream)
-            state, result, reason = evaluate(frame, p, stream.state)
-            stream.updated_at = now
+            cached = self.stream_state(s, stream_id, p.id)
+            state, result, reason = evaluate(frame, p, cached['state'])
+            cached['state'] = state
             if result is None:
-                stream.state = state
+                self.checkpoint_stream(s, stream_id, cached, frame.timestamp, now)
                 return IngestResult(accepted=reason != 'duplicate_or_out_of_order', reason=reason, quality='buffering')
+            if result['quality'] == 'uncertain':
+                # Uncertain frames arrive at camera rate. Persist them at score cadence only.
+                if cached['uncertain_ts'] is not None and 0 <= frame.timestamp-cached['uncertain_ts'] < 1/3-.001:
+                    self.checkpoint_stream(s, stream_id, cached, frame.timestamp, now)
+                    return IngestResult(accepted=True, reason=reason, quality='uncertain')
+                cached['uncertain_ts'] = frame.timestamp
             features, hits = result['features'], result['rule_hits']
             samples = result['samples']
             window_ready = len(samples) >= 3 and samples[-1]['t']-samples[0]['t'] >= 1.8
@@ -100,7 +140,8 @@ class Guardian:
             continuous = state.get('baseline_at') is not None and frame.timestamp-state['baseline_at'] <= .75
             state['baseline_count'] = (state.get('baseline_count', 0) if continuous else 0)+1 if baseline['flag'] and result['quality'] == 'good' else 0
             state['baseline_at'] = frame.timestamp
-            stream.state = dict(state)
+            cached['state'] = dict(state)
+            self.checkpoint_stream(s, stream_id, cached, frame.timestamp, now)
             if state['baseline_count'] >= 3:
                 hits.append('personal_baseline')
             features.update(anomaly_score=baseline['score'], anchor_score=baseline['anchor_score'],
@@ -143,9 +184,13 @@ class Guardian:
                         self.queue(s, ev, now)
             if ev and result['quality'] == 'good':
                 ev.features = event_features(ev.features, features)
+            prediction = self.actions.observe(stream_id, p, samples, result['quality'],
+                                              ev.id if ev else None, hits,
+                                              'synthetic' if frame.camera_id == 'synthetic-demo' else frame.source)
             return IngestResult(accepted=True, reason=reason, quality=result['quality'], features=features,
                                 rule_hits=hits, event_id=ev.id if ev else None, anomaly_score=baseline['score'], anchor_score=baseline['anchor_score'],
-                                baseline_contributions=baseline['contributions'], baseline_state=baseline['state'])
+                                baseline_contributions=baseline['contributions'], baseline_state=baseline['state'],
+                                action_prediction=prediction)
 
     def queue(self, s, ev, now, repeat=False):
         if ev.status != 'open' or ev.urgency < 1:
@@ -170,7 +215,7 @@ class Guardian:
                                urgency=ev.urgency, due_at=due, state='pending', attempts=0))
 
     def acknowledge(self, event_id, author, note):
-        with self.db.lock, self.db.sessions.begin() as s:
+        with self.event_lock(event_id), self.db.lock, self.db.sessions.begin() as s:
             ev = s.get(Event, event_id, with_for_update=True)
             if not ev:
                 raise KeyError(event_id)
@@ -197,7 +242,8 @@ class Guardian:
                         acknowledged_by=ev.acknowledged_by, next_escalation_at=ev.next_escalation_at, notifications=notifications,
                         rule_summary=' '.join(LABELS[h] for h in ev.rule_hits if h in LABELS) or ev.summary,
                         human_review=review, floor_decision=decision,
-                        baseline_contributions=json.loads(ev.features.get('baseline_contributions_json', '[]')))
+                        baseline_contributions=json.loads(ev.features.get('baseline_contributions_json', '[]')),
+                        action_prediction=json.loads(ev.features.get('action_prediction_json', 'null')))
 
     def events(self, person_id=None):
         with self.db.sessions() as s:
@@ -222,3 +268,4 @@ class Guardian:
                 s.execute(delete(Stream).where(Stream.person_id == p.id, Stream.updated_at < now-86400))
                 for ev in s.scalars(select(Event).where(Event.person_id == p.id, Event.opened_at < cutoff.timestamp())):
                     ev.keyframes = []
+            self.forget_streams(older_than=now-86400)

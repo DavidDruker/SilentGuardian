@@ -351,26 +351,37 @@ export function TrendsPanel({ profile, onError }: Props) {
               role="img"
               aria-label={`${synthetic ? "Synthetic" : "Observed"} daily ${feature} with frozen anchor`}
             >
-              <line x1="40" y1="190" x2="560" y2="190" stroke="#9aa8a0" />
+              <line x1="40" y1="190" x2="560" y2="190" stroke="#6f7f96" />
               <polyline
                 points={shown.map((p, i) => `${x(i)},${y(p.mean)}`).join(" ")}
                 fill="none"
-                stroke="#20685b"
-                strokeWidth="3"
+                stroke="#0f1d31"
+                strokeWidth="2"
               />
               {shown[0].anchor !== null && (
-                <line
-                  x1="40"
-                  x2="560"
-                  y1={y(shown[0].anchor)}
-                  y2={y(shown[0].anchor)}
-                  stroke="#bb853e"
-                  strokeDasharray="6 4"
-                />
+                <>
+                  <line
+                    x1="40"
+                    x2="560"
+                    y1={y(shown[0].anchor)}
+                    y2={y(shown[0].anchor)}
+                    stroke="#1b5e9e"
+                    strokeWidth="2"
+                    strokeDasharray="6 4"
+                  />
+                  <text
+                    x="560"
+                    y={y(shown[0].anchor) + 16}
+                    textAnchor="end"
+                    fontSize="11"
+                  >
+                    Anchor median
+                  </text>
+                </>
               )}
               {shown.map((p, i) => (
                 <g key={p.day}>
-                  <circle cx={x(i)} cy={y(p.mean)} r="4" fill="#20685b" />
+                  <circle cx={x(i)} cy={y(p.mean)} r="4" fill="#0f1d31" />
                   <text x={x(i)} y="214" textAnchor="middle" fontSize="10">
                     {p.day.slice(5)}
                   </text>
@@ -386,7 +397,7 @@ export function TrendsPanel({ profile, onError }: Props) {
               ))}
             </svg>
             <p className="muted">
-              Green: daily mean. Dashed amber: frozen anchor median
+              Solid line: daily mean. Dashed line: frozen anchor median
               {synthetic ? " (synthetic reference)" : ""}.
             </p>
             <div className="table-scroll">

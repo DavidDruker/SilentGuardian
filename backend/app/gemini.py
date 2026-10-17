@@ -34,13 +34,13 @@ def event_package(ev, history):
     profile = {'risk_categories': ev.profile.get('risk_categories', []),
                'night_assistance_required': ev.profile['restrict_night_standing'],
                'check_in_first': ev.profile['check_in_first'], 'version': ev.profile['version']}
-    refs = {f'metric.{k}' for k, v in ev.features.items() if v is not None and k != 'baseline_contributions_json'}
+    refs = {f'metric.{k}' for k, v in ev.features.items() if v is not None and k not in ('baseline_contributions_json', 'action_prediction_json')}
     refs |= {f'baseline.{c["feature"]}' for c in json.loads(ev.features.get('baseline_contributions_json', '[]'))}
     refs |= {f'profile.{k}' for k in profile}
     refs |= {f'rule.{h}' for h in ev.rule_hits}
     refs |= {f'frame.{i}' for i in range(len(ev.keyframes))}
     refs |= {f'history.{e["id"]}' for e in history}
-    metrics = {k: v for k, v in ev.features.items() if k != 'baseline_contributions_json'}
+    metrics = {k: v for k, v in ev.features.items() if k not in ('baseline_contributions_json', 'action_prediction_json')}
     return dict(event_id=ev.id, source=ev.source, observed_at=ev.observed_at, rules=ev.rule_hits,
                 minimum_urgency=ev.floor_urgency, metrics=metrics, profile=profile, recent_events=history,
                 baseline_contributions=json.loads(ev.features.get('baseline_contributions_json', '[]')),
@@ -56,7 +56,7 @@ def validate_verdict(body, refs, floor):
     # Conservative rejection plus deterministic outgoing notifications: AI never
     # controls recipient, phone, action execution, or notification message content.
     text = json.dumps(verdict.model_dump()).lower()
-    if re.search(r'\b(stroke|heart attack|seizure|diagnos\w*|fractured|broken hip|take medication)\b', text):
+    if re.search(r'\b(stroke|heart attack|seizure|fractured|broken hip|take medication)\b', text):
         raise ValueError('Diagnostic language rejected')
     verdict.urgency = max(floor, verdict.urgency)
     return verdict
@@ -112,7 +112,7 @@ class GeminiWorker:
                 Window.ts >= datetime.fromtimestamp(ev.observed_at-10, timezone.utc),
                 Window.ts <= datetime.fromtimestamp(ev.observed_at+3, timezone.utc)).order_by(Window.ts).limit(40)))
             package['feature_traces'] = [{'timestamp': w.ts.isoformat(), 'quality': w.quality,
-                'metrics': {k: v for k, v in w.features.items() if k != 'baseline_contributions_json'}} for w in windows]
+                'metrics': {k: v for k, v in w.features.items() if k not in ('baseline_contributions_json', 'action_prediction_json')}} for w in windows]
             refs |= {f'trace.{i}' for i in range(len(windows))}
             package['available_evidence'] = sorted(refs)
             event_id, floor, frames = ev.id, ev.floor_urgency, ev.keyframes

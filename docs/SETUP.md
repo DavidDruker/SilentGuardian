@@ -2,6 +2,11 @@
 
 The local app works without cloud credentials. Real Gemini verdicts, Tiger Data persistence, Vultr hosting, web push, and phone calls have **not** been verified against external services. SMS is intentionally omitted. No resources have been purchased or provisioned.
 
+The optional ST-GCN++ classifier needs no provider credentials. Run
+`python scripts/dev.py --with-action-model --build` locally. Compose includes the
+CPU runtime and verified weights when `WITH_ACTION_MODEL=1` (its default).
+It records shadow predictions only. See [ACTION_MODEL.md](ACTION_MODEL.md).
+
 ## Configuration locations
 
 Copy `.env.example` to **`.env` in the repository root**. Never commit `.env`; the browser must not receive provider credentials. For Vultr, put the same `.env` beside `compose.yaml` on the VM, restricted to its owner. Restart the app after changes. These are the fields to update when credentials become available:
@@ -10,7 +15,7 @@ Copy `.env.example` to **`.env` in the repository root**. Never commit `.env`; t
 | --- | --- | --- |
 | Tiger Data | `DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:PORT/DB?sslmode=require` | Provisioned service connection details; URL-encode special characters in credentials |
 | Gemini | `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_BILLED_PROJECT_CONFIRMED=true` | An API project associated with active billing; verify billing and model access, then record per-profile Gemini consent in the app |
-| Vultr | `PUBLIC_URL`, `ALLOWED_ORIGINS`, `APP_ENV=production`, `DEMO_ENABLED=false`, `DOMAIN` | VM hostname/domain and DNS. SSH access is needed to deploy; the app does not need a Vultr API key |
+| Vultr | `PUBLIC_URL`, `ALLOWED_ORIGINS`, `APP_ENV=production`, `DEMO_ENABLED`, `DOMAIN` | VM hostname/domain and DNS. SSH access is needed to deploy; the app does not need a Vultr API key |
 | Operator sign-in | `OPERATOR_TOKEN`, `SIGNING_SECRET` | Generate two independent random secrets of at least 32 characters; replace the local defaults |
 | Web push | `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT` | Generate a VAPID key pair; use an appropriate `mailto:` contact for the subject |
 | Ring-only phone call | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, `DEMO_CALL_TO`, `CALL_TEST_ALLOWLIST` | Twilio Voice account, voice-capable caller number, and the user's explicitly supplied personal destination in E.164 format |
@@ -63,6 +68,6 @@ curl --fail https://YOUR_DOMAIN/healthz
 
 Run **one API worker/replica**, as specified by the Dockerfile. The notification worker and camera ingestion share a local lock, with PostgreSQL event row locks as an additional guard. This intentionally does not claim multi-replica scheduling support. Caddy provides TLS and WebSocket proxying. Browser camera and push require a secure context (localhost works for local tests).
 
-For a hosted synthetic demonstration, use a separate development deployment with strong credentials, HTTPS and an explicit trusted audience. Production mode deliberately disables synthetic replay. Load a staged local video only in a development/demo deployment; real camera capture works in either mode.
+For the hosted demonstration, run `APP_ENV=production` with `DEMO_ENABLED=true`. Production still refuses to start without unique 32+ character secrets and an HTTPS `PUBLIC_URL`, and sets the secure cookie flag. Synthetic replays stay labelled as synthetic; set `DEMO_ENABLED=false` to remove them. Real camera capture works in either mode.
 
 Acceptance after credentials arrive: verify health, apply the migration to the real service, run Margaret/Daniel scenarios, check the actual phone, acknowledge from a trusted-contact browser, restart the service and verify the event remains acknowledged. Docker is not installed in the current workstation, so the image and Compose deployment have not been executed here.

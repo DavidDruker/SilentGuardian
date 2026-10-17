@@ -10,6 +10,7 @@ from .schemas import PoseFrame, Profile
 
 KEYS = (0, 11, 12, 15, 16, 23, 24, 27, 28)
 MODEL_KEYS = (11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28)
+BRIDGE_SECONDS = 3
 
 
 def midpoint(points, a, b):
@@ -78,13 +79,27 @@ def evaluate(frame: PoseFrame, profile: Profile, state: dict):
     state['last_timestamp'] = t
     current = sample(frame, profile)
     if current is None:
-        state.update(samples=[], still_since=None, sway_since=None, recovery_since=None, last_good=None)
+        # A person lying on the floor often hides wrists or ankles for a moment. Keep the
+        # stillness timer through at most BRIDGE_SECONDS of low-visibility frames; the
+        # next good frame confirms it (same place, still on the floor) or resets it.
+        gap_from = state.get('gap_from') or (state['samples'][-1]['t'] if state.get('samples') else t)
+        keep = state.get('fall_seen') and state.get('still_since') is not None and t - gap_from <= BRIDGE_SECONDS
+        state.update(samples=[], sway_since=None, recovery_since=None, last_good=None, gap_from=gap_from)
+        if not keep:
+            state.update(still_since=None, still_anchor=None)
         return state, dict(quality='uncertain', features={}, rule_hits=[], samples=[]), 'low_visibility_or_ambiguous'
     prior = state.get('samples', [])
+    gap_from = state.pop('gap_from', None)
+    if gap_from is not None and state.get('still_since') is not None:
+        anchor = state.get('still_anchor')
+        state['bridged'] = bool(anchor and t - gap_from <= BRIDGE_SECONDS and current['posture'] == 'lying' and not current['in_bed']
+                                and math.dist((current['x'], current['y']), anchor) / current['torso'] <= .1)
+        if not state['bridged']:
+            state.update(still_since=None, still_anchor=None)
     # Never bridge missing observations to claim continuous motion/stillness.
     if prior and t - prior[-1]['t'] > .75:
         prior = []
-        state.update(still_since=None, sway_since=None, recovery_since=None)
+        state.update(still_since=None, still_anchor=None, sway_since=None, recovery_since=None, bridged=False)
     samples = [s for s in prior if t - s['t'] <= 2] + [current]
     state.update(samples=samples, last_good=t)
     if t - state.get('last_score', 0) < 1 / 3 - .001:
@@ -112,10 +127,13 @@ def evaluate(frame: PoseFrame, profile: Profile, state: dict):
     # Recent .6 s isolates stillness from the initial impact still in the 2 s window.
     recent = [s for s in samples if t-s['t'] <= .6]
     still = on_floor and len(recent) >= 3 and max(math.dist((s['x'],s['y']), (current['x'],current['y'])) / scale for s in recent) < .04 and all(np.linalg.norm(np.array(s['vector'])-np.array(current['vector'])) < .3 for s in recent)
+    # Right after a bridged gap there are too few samples to judge stillness; hold the timer.
+    settling = state.get('bridged') and on_floor and len(recent) < 3
     if still and state.get('fall_seen'):
         state['still_since'] = state.get('still_since') or t
-    else:
-        state['still_since'] = None
+        state.update(still_anchor=(current['x'], current['y']), bridged=False)
+    elif not settling:
+        state.update(still_since=None, still_anchor=None, bridged=False)
     still_for = t-state['still_since'] if state.get('still_since') else 0
     if still_for >= 30:
         hits.append('prolonged_stillness')

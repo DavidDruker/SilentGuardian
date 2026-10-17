@@ -1,5 +1,5 @@
 -- Run only after scripts/migrate_tiger.py reports compatible provisioned service.
--- Core relational tables are created by SQLAlchemy; only pose_windows is hypertabled.
+-- Core relational tables are created by SQLAlchemy. Only pose_windows is hypertabled.
 SELECT create_hypertable('pose_windows', by_range('ts'), if_not_exists => TRUE, migrate_data => TRUE);
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS hourly_movement

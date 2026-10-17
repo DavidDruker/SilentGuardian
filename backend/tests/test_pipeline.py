@@ -295,3 +295,95 @@ def test_recovery_ends_the_prior_fall_stillness_episode(guardian):
     for f in scenario_frames('normal', 'daniel', start=fall[-1].timestamp+1/15, duration=5):
         state, _, _ = evaluate(f, p, state)
     assert not state['fall_seen']
+
+
+def test_tiger_migration_splits_statements_outside_comments():
+    from pathlib import Path
+    from scripts.migrate_tiger import statements
+    parts = statements(Path('deploy/tiger.sql').read_text())
+    assert len(parts) == 5
+    assert all(p.split()[0].upper() in ('SELECT', 'CREATE') and '--' not in p for p in parts)
+    assert statements('-- a; b\nSELECT 1;\n-- c;\nSELECT 2;') == ['SELECT 1', 'SELECT 2']
+
+
+def test_synthetic_seeds_allow_gemini_and_disclaimers_pass_validation(guardian):
+    assert all(p.gemini_consent for p in guardian.profiles())
+    disclaimer = verdict_json().replace('A possible fall was observed.', 'Observation only, not a diagnosis.')
+    assert validate_verdict(disclaimer, {'rule.fall'}, 2).urgency == 2
+    with pytest.raises(ValueError, match='Diagnostic'):
+        validate_verdict(verdict_json().replace('possible fall', 'possible stroke'), {'rule.fall'}, 2)
+
+
+def test_ingest_is_not_blocked_by_inflight_push(guardian):
+    import time
+    from threading import Event as Signal, Thread
+    from backend.app.db import PushSubscription
+    guardian.settings.notification_mode = 'live'
+    run(guardian, 'fall')
+    with guardian.db.sessions.begin() as s:
+        s.add(PushSubscription(id='daniel:son', person_id='daniel', contact_id='son',
+                               body={'endpoint': 'https://fcm.googleapis.com/test', 'keys': {}}))
+    entered, release = Signal(), Signal()
+    class Slow:
+        def push(self, subscription, payload):
+            entered.set()
+            assert release.wait(5)
+    send_thread = Thread(target=NotificationWorker(guardian, Slow()).tick)
+    send_thread.start()
+    try:
+        assert entered.wait(5)
+        started = time.monotonic()
+        for frame in scenario_frames('normal', 'margaret', duration=1):
+            guardian.ingest(frame)
+        assert time.monotonic()-started < .5
+    finally:
+        release.set()
+        send_thread.join(5)
+    sent = [n for n in guardian.events(person_id='daniel')[0].notifications if n.channel == 'push' and n.state == 'provider_accepted']
+    assert len(sent) == 1
+
+
+def test_stream_state_is_checkpointed_not_rewritten_per_frame(guardian):
+    from sqlalchemy import event as sa_event
+    writes = []
+    def count(conn, cursor, statement, *args):
+        if statement.lstrip().upper().startswith(('UPDATE STREAMS', 'INSERT INTO STREAMS')):
+            writes.append(statement)
+    sa_event.listen(guardian.db.engine, 'before_cursor_execute', count)
+    frames = list(scenario_frames('normal', 'daniel', duration=6, session_id='checkpoint'))
+    low = list(scenario_frames('low_visibility', 'daniel', start=frames[-1].timestamp+1, duration=3, session_id='checkpoint'))
+    for f in frames+low:
+        guardian.ingest(f)
+    sa_event.remove(guardian.db.engine, 'before_cursor_execute', count)
+    span = (frames[-1].timestamp-frames[0].timestamp)+(low[-1].timestamp-low[0].timestamp)
+    assert len(writes) <= span*3.4+2 and len(writes) < len(frames+low)/3
+    with guardian.db.sessions() as s:
+        assert len(list(s.scalars(select(Window).where(Window.quality == 0)))) <= 3*3.4+1
+
+
+def occlude(frame):
+    pose = frame.poses[0].model_dump()
+    pose['landmarks'] = [{**l, 'visibility': .1} for l in pose['landmarks']]
+    return PoseFrame.model_validate({**frame.model_dump(), 'poses': [pose]})
+
+
+def first_long_lie(frames, profile, gap=None):
+    state = {}
+    for f in frames:
+        if gap and gap[0] <= f.timestamp-frames[0].timestamp < gap[1]:
+            f = occlude(f)
+        state, r, _ = evaluate(f, profile, state)
+        if r and 'prolonged_stillness' in r['rule_hits']:
+            return f.timestamp-frames[0].timestamp
+    return None
+
+
+def test_long_lie_survives_brief_occlusion_but_not_long_gaps(guardian):
+    p = next(p for p in guardian.profiles() if p.id == 'daniel')
+    frames = list(scenario_frames('fall', 'daniel', duration=45))
+    clear = first_long_lie(frames, p)
+    assert clear is not None
+    brief = first_long_lie(frames, p, gap=(10, 12))
+    assert brief is not None and clear <= brief <= clear+1
+    long = first_long_lie(frames, p, gap=(10, 15))
+    assert long is None or long >= clear+4

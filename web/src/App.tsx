@@ -1,23 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
-  ArrowRight,
   Bell,
+  ChartLine,
   Check,
   ChevronRight,
   CircleHelp,
+  ClipboardCheck,
   HeartHandshake,
   LayoutDashboard,
-  Leaf,
-  LockKeyhole,
   LogOut,
   Phone,
+  ScrollText,
   Settings2,
-  ShieldCheck,
   Users,
   X,
 } from "lucide-react";
-import { api, type AppConfig, type GuardianEvent, type Profile } from "./api";
+import { api, type AppConfig, type GuardianEvent, type Profile, uid } from "./api";
 import { Capture } from "./Capture";
 import { ProfileEditor } from "./ProfileEditor";
 import { EventDetail, pretty, timeLabel, urgencyNames } from "./EventDetail";
@@ -133,7 +132,7 @@ export default function App() {
     setCallBusy(true);
     try {
       const r = await api<{ event_id: string; mode: string }>(
-        `/demo/call/${crypto.randomUUID()}`,
+        `/demo/call/${uid()}`,
         "POST",
       );
       setNotice(
@@ -229,8 +228,11 @@ export default function App() {
     return (
       <main className="login-page">
         <div className="login-art">
-          <ShieldCheck size={58} />
-          <span className="eyebrow">SILENT GUARDIAN</span>
+          <img
+            className="login-logo"
+            src="/brand/hayvn-lockup-reversed.png"
+            alt="Hayvn"
+          />
           <h1>
             Here for the
             <br />
@@ -243,15 +245,9 @@ export default function App() {
             <br />
             People who care.
           </p>
-          <div className="login-orbit">
-            <HeartHandshake size={90} />
-          </div>
           <small>Care and Personal · One connected circle</small>
         </div>
         <section className="login-form">
-          <span className="brand-mark">
-            <ShieldCheck />
-          </span>
           <h2>A little peace of mind.</h2>
           <p>Open your monitoring station.</p>
           <form onSubmit={login}>
@@ -265,9 +261,7 @@ export default function App() {
                 placeholder="Enter your access token"
               />
             </label>
-            <button className="primary">
-              Open station <ArrowRight size={17} />
-            </button>
+            <button className="primary">Open station</button>
           </form>
           {config?.demo_enabled && (
             <button className="secondary" onClick={demo}>
@@ -292,14 +286,11 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <a className="brand" href="#">
-          <span className="brand-mark">
-            <ShieldCheck />
-          </span>
-          <strong>
-            silent
-            <br />
-            guardian<span>CARE, CONNECTED.</span>
-          </strong>
+          <img
+            className="brand-logo"
+            src="/brand/hayvn-lockup.png"
+            alt="Hayvn"
+          />
         </a>
         <div className="mode-switch">
           <button
@@ -330,9 +321,9 @@ export default function App() {
               label: mode === "care" ? "Care team" : "Trusted circle",
             },
             { id: "setup", icon: Settings2, label: "Demo setup" },
-            { id: "trends", icon: Activity, label: "Trends" },
-            { id: "privacy", icon: LockKeyhole, label: "Privacy" },
-            { id: "evidence", icon: ShieldCheck, label: "Evidence" },
+            { id: "trends", icon: ChartLine, label: "Trends" },
+            { id: "privacy", icon: ClipboardCheck, label: "Privacy" },
+            { id: "evidence", icon: ScrollText, label: "Evidence" },
           ].map((n) => (
             <button
               key={n.id}
@@ -349,7 +340,6 @@ export default function App() {
         </nav>
         <div className="sidebar-bottom">
           <div className="privacy-note">
-            <Leaf size={21} />
             <h4>Privacy comes first.</h4>
             <p>
               Video stays on the device.
@@ -457,7 +447,6 @@ export default function App() {
             </div>
           )}
           <div className="demo-banner">
-            <ShieldCheck size={16} />
             <span>
               {profile.data_category === "consenting_teammate"
                 ? "Consenting teammate"
@@ -490,7 +479,6 @@ export default function App() {
                       {mode === "care" ? "resident profile" : "camera status"}
                     </small>
                   </strong>
-                  <Users size={22} />
                 </div>
                 <div className="summary-card">
                   <span>Needs a check</span>
@@ -498,7 +486,6 @@ export default function App() {
                     {active.length}
                     <small>open event{active.length !== 1 ? "s" : ""}</small>
                   </strong>
-                  <Bell size={22} />
                 </div>
                 <div className="summary-card">
                   <span>People ready to help</span>
@@ -508,7 +495,6 @@ export default function App() {
                       in the {mode === "care" ? "care team" : "trusted circle"}
                     </small>
                   </strong>
-                  <HeartHandshake size={22} />
                 </div>
               </div>
               {checkIn && (
@@ -548,7 +534,7 @@ export default function App() {
                         className="text-button"
                         onClick={() => setPage("events")}
                       >
-                        View all <ArrowRight size={15} />
+                        View all
                       </button>
                     </div>
                     <EventList
@@ -573,12 +559,7 @@ export default function App() {
                         <Settings2 size={16} />
                       </button>
                     </div>
-                    <div className="person-avatar">
-                      {profile.alias[0]}
-                      <span>
-                        <Leaf size={14} />
-                      </span>
-                    </div>
+                    <div className="person-avatar">{profile.alias[0]}</div>
                     <h2>{profile.alias}</h2>
                     <p>
                       {profile.age} years ·{" "}
@@ -643,7 +624,6 @@ export default function App() {
                     </div>
                   </section>
                   <section className="support-card">
-                    <HeartHandshake size={25} />
                     <h3>Support is a shared effort.</h3>
                     <p>
                       {profile.contacts?.[0]?.name || "Add a contact"} is first
@@ -653,7 +633,7 @@ export default function App() {
                       className="text-button"
                       onClick={() => setPage("circle")}
                     >
-                      Meet the circle <ArrowRight size={15} />
+                      Meet the circle
                     </button>
                   </section>
                   <div className="small-note">
@@ -711,7 +691,7 @@ export default function App() {
                 </div>
               ))}
               <button className="text-button" onClick={() => setEditing(true)}>
-                Edit contacts and escalation <ArrowRight size={15} />
+                Edit contacts and escalation
               </button>
             </section>
           )}
@@ -797,7 +777,6 @@ export default function App() {
                   planning constraint, not a provider billing cap.
                 </p>
                 <div className="privacy-callout">
-                  <LockKeyhole size={18} />
                   <span>
                     The server receives skeletons; raw video stays on the
                     capture device. Seeded example profiles are synthetic.
@@ -819,7 +798,8 @@ export default function App() {
           {page === "evidence" && <EvidencePanel onError={setError} />}
           <footer className="workspace-footer">
             <span>
-              <ShieldCheck size={14} /> Silent Guardian
+              <img className="footer-mark" src="/brand/hayvn-mark.png" alt="" />
+              Hayvn
             </span>
             <span>Staged, not clinical · Not a medical device</span>
             <span>Made for people.</span>
@@ -856,9 +836,6 @@ function EventList({
   if (!events.length)
     return (
       <div className="empty-events">
-        <span>
-          <Check size={23} />
-        </span>
         <h3>A quiet moment.</h3>
         <p>No events yet. Start capture or play a labelled demo scenario.</p>
       </div>

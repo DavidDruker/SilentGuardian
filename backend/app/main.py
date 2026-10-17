@@ -57,26 +57,40 @@ def create_app(cfg: Settings = settings, db=None, clock=time.time):
             await asyncio.sleep(3600)
             await asyncio.to_thread(guardian.cleanup)
 
+    async def action_loop():
+        await asyncio.to_thread(guardian.actions.load)
+        while True:
+            try:
+                worked = await asyncio.to_thread(guardian.actions.tick)
+            except Exception as exc:
+                log.error('Action worker failed: %s', type(exc).__name__)
+                worked = False
+            await asyncio.sleep(.01 if worked else .1)
+
     @asynccontextmanager
     async def lifespan(app):
         database.create()
         guardian.seed()
-        jobs = [asyncio.create_task(f()) for f in (notify_loop, verdict_loop, cleanup_loop)] if cfg.worker_enabled else []
+        jobs = [asyncio.create_task(f()) for f in (notify_loop, verdict_loop, cleanup_loop, action_loop)] if cfg.worker_enabled else []
         yield
+        guardian.actions.close()
         for task in jobs:
             task.cancel()
         await asyncio.gather(*jobs, return_exceptions=True)
 
     app = FastAPI(title='Silent Guardian API', version='0.1.0', lifespan=lifespan)
     app.state.guardian, app.state.notifications, app.state.gemini = guardian, notifications, gemini
-    origins = set(cfg.allowed_origins.split(','))
+    origins = {o.strip().rstrip('/') for o in cfg.allowed_origins.split(',') if o.strip()}
     login_attempts = defaultdict(deque)
 
     @app.middleware('http')
     async def request_policy(request, call_next):
         if request.method not in ('GET', 'HEAD', 'OPTIONS') and request.headers.get('origin') and request.headers['origin'] not in origins:
             return JSONResponse({'detail': 'Origin not allowed'}, 403)
-        if int(request.headers.get('content-length', '0')) > 256_000:
+        length = request.headers.get('content-length', '0')
+        if not length.isdigit():
+            return JSONResponse({'detail': 'Invalid Content-Length'}, 400)
+        if int(length) > 256_000:
             return JSONResponse({'detail': 'Request too large'}, 413)
         response = await call_next(request)
         response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -131,6 +145,11 @@ def create_app(cfg: Settings = settings, db=None, clock=time.time):
     def profiles():
         return guardian.profiles()
 
+    @app.get('/api/action-model', dependencies=[Depends(operator)])
+    def action_model_status(stream_id: str | None = None):
+        return {**guardian.actions.status(),
+                'latest': guardian.actions.latest(stream_id) if stream_id else None}
+
     @app.put('/api/profiles/{person_id}', response_model=Profile, dependencies=[Depends(operator)])
     def save_profile(person_id: str, profile: Profile):
         if person_id != profile.id:
@@ -167,7 +186,7 @@ def create_app(cfg: Settings = settings, db=None, clock=time.time):
 
     @app.post('/api/events/{event_id}/feedback', dependencies=[Depends(operator)])
     def feedback(event_id: str, body: Feedback):
-        with database.lock, database.sessions.begin() as s:
+        with guardian.event_lock(event_id), database.lock, database.sessions.begin() as s:
             ev = s.get(Event, event_id)
             if not ev:
                 raise HTTPException(404, 'Event not found')

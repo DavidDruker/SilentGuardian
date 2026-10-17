@@ -28,6 +28,12 @@ The [October 17 adjustments](docs/ADJUSTMENTS.md) also add an 8× simulated repl
 
 ## Verify
 
+The optional **ST-GCN++ backend classifier** runs in shadow mode with official
+pretrained weights. Use `python scripts/dev.py --with-action-model --build` to
+install it. Capture and event details show learned action scores alongside rules;
+model predictions do not yet control alerts. [Model setup and evaluation](docs/ACTION_MODEL.md)
+documents the adapter, CPU runtime, licensing and validation limits.
+
 ```powershell
 .\.venv\Scripts\python.exe -m pytest backend/tests -q
 .\.venv\Scripts\python.exe -m scripts.evaluate_replays
@@ -47,6 +53,7 @@ See [the verification record](docs/VERIFICATION.md) for completed local checks a
 | `backend/app` | API contracts, persistence, rules, events, Gemini, notifications |
 | `backend/tests` | Integration and failure-path tests |
 | `backend/app/baseline.py` | Robust posture-specific statistics and frozen-anchor comparison |
+| `backend/app/action_model.py`, `actions.py` | Pretrained ST-GCN++ adapter and bounded shadow-inference worker |
 | `web/src` | Care station, Personal home, capture, profiles, event/contact views |
 | `scripts` | Local launcher, schema export, replay evaluation, Tiger migration |
 | `deploy` | TLS proxy and Tiger Data SQL |
@@ -55,4 +62,4 @@ See [the verification record](docs/VERIFICATION.md) for completed local checks a
 
 [MediaPipe browser guide](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker/web_js), [Gemini structured output](https://ai.google.dev/gemini-api/docs/structured-output), [Tiger Data hypertables](https://www.tigerdata.com/docs/reference/timescaledb/hypertables/create_hypertable), and [Twilio Call API](https://www.twilio.com/docs/voice/api/call-resource).
 
-The idea and architecture were planned in advance. Code, schemas and prompts were authored in this workspace with OpenAI Codex assistance; the supplied blueprint appendices are not committed. Compliance with the event's development window awaits organizer confirmation and timestamp review. Demonstration profiles and bundled motion fixtures are synthetic. This is an engineering prototype, not a medical device or an emergency service.
+The idea and architecture were planned in advance. Application code, schemas and prompts were authored in this workspace with OpenAI Codex assistance; the supplied blueprint appendices are not committed. The ST-GCN++ inference subset and pretrained checkpoint are third-party OpenMMLab work, attributed in `backend/app/vendor/stgcn/NOTICE.md`, not newly authored code. Compliance with the event's development window and use of pretrained components awaits organizer confirmation and timestamp review. Demonstration profiles and bundled motion fixtures are synthetic. This is an engineering prototype, not a medical device or an emergency service.

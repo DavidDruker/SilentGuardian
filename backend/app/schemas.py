@@ -171,6 +171,7 @@ class EventOut(StrictModel):
     human_review: str | None = None
     floor_decision: dict | None = None
     baseline_contributions: list[dict] = Field(default_factory=list)
+    action_prediction: dict | None = None
 
 
 class IngestResult(StrictModel):
@@ -184,6 +185,7 @@ class IngestResult(StrictModel):
     anchor_score: float | None = None
     baseline_contributions: list[dict] = Field(default_factory=list)
     baseline_state: str = 'uncalibrated'
+    action_prediction: dict | None = None
 
 
 class Login(StrictModel):

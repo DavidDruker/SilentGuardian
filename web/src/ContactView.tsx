@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, HeartHandshake, ShieldCheck } from "lucide-react";
+import { Check } from "lucide-react";
 import { api } from "./api";
 import { urgencyNames } from "./EventDetail";
 
@@ -47,17 +47,9 @@ export function ContactView({ parts }: { parts: string[] }) {
   return (
     <main className="contact-page">
       <div className="brand">
-        <span className="brand-mark">
-          <ShieldCheck />
-        </span>
-        <strong>
-          silent guardian<span>A little closer, even from afar.</span>
-        </strong>
+        <img className="brand-logo" src="/brand/hayvn-lockup.png" alt="Hayvn" />
       </div>
       <section className="contact-card">
-        <div className="contact-hero">
-          <HeartHandshake size={42} />
-        </div>
         <span className="eyebrow">YOUR TRUSTED CIRCLE</span>
         {ev ? (
           <>

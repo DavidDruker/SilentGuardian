@@ -109,6 +109,50 @@
         }
       }
     },
+    "/api/action-model": {
+      "get": {
+        "summary": "Action Model Status",
+        "operationId": "action_model_status_api_action_model_get",
+        "parameters": [
+          {
+            "name": "stream_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stream Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/profiles/{person_id}": {
       "put": {
         "summary": "Save Profile",
@@ -1552,6 +1596,18 @@
             },
             "type": "array",
             "title": "Baseline Contributions"
+          },
+          "action_prediction": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Prediction"
           }
         },
         "additionalProperties": false,
@@ -1727,6 +1783,18 @@
             "type": "string",
             "title": "Baseline State",
             "default": "uncalibrated"
+          },
+          "action_prediction": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Prediction"
           }
         },
         "additionalProperties": false,

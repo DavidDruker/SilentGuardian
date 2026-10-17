@@ -4,6 +4,23 @@ The credential-free local demo is implemented and checked. The plan's external a
 
 ## Completed checks
 
+- ST-GCN++ addition: official checkpoint checksum and strict weight loading verified;
+  real CPU inference, MediaPipe-to-COCO mapping, shadow isolation, consent/purge
+  races, bounded queues and event evidence tested. Full suite: **61 passed** before
+  the final queue-priority change; **19 focused model tests passed** afterward,
+  including transition preservation and final-result retrieval. The final TypeScript
+  and Vite production build passed too.
+  The model runs in shadow mode and does not change alerts. No teammate-recording
+  accuracy or Vultr throughput has been established. See [ACTION_MODEL.md](ACTION_MODEL.md).
+- The model panel was exercised through browser replay and inspected at 390 × 844;
+  document width matched scroll width (375 pixels). The temporary viewport was reset.
+- Final browser check after queue prioritization: an 8× synthetic fall retained
+  a falling-class prediction from the actual transition in event detail; the
+  live panel retrieved the final result after replay ended. Later stationary
+  synthetic poses were assigned unrelated known action labels, illustrating why
+  this pretrained model is still shadow-only. Synthetic class scores are not
+  measured fall accuracy. Inference timing varies with machine load.
+
 - Full backend suite after the October 17 adjustments: **44 passed**. Coverage includes baseline warm-up/persistence, calibration review and frozen anchor, held-out gate separation, ROI exclusion, scaled deadlines, dismissal followed by long-lie escalation, category-only Gemini input, consent revocation, deletion and no consent re-seeding. The only warning is a Starlette TestClient deprecation for its current httpx integration.
 - TypeScript compilation and Vite production build passed. The build bundles the MediaPipe worker as a classic worker and serves its model and WASM locally.
 - `python scripts/dev.py` started the app successfully at `http://localhost:8000` with the final backend. Existing local events and acknowledgements survived the server restart.
@@ -25,6 +42,7 @@ The credential-free local demo is implemented and checked. The plan's external a
 | Web push | Subscription and dispatch path prepared; local behavior tested | VAPID keys, reachable HTTPS origin and real browser receipt |
 | Ring-only phone | Dry run and mocked outbound request verified | Voice credentials, explicitly supplied personal number and allowlist; verify handset ringing |
 | Vultr | Container, Compose and Caddy configuration prepared | VM/domain/SSH access and Docker execution; Docker is unavailable on this workstation |
-| Personalization | Median/MAD baseline, frozen anchor, current update, contribution explanations, Trends and held-out evaluation gate tested; no baseline fitted on real data | Reviewed normal recordings and independent held-out clips from two people/two angles; no PyTorch dependency |
+| Personalization | Median/MAD baseline, frozen anchor, current update, contribution explanations, Trends and held-out evaluation gate tested; no baseline fitted on real data | Reviewed normal recordings and independent held-out clips from two people/two angles |
+| Learned action recognition | Official ST-GCN++ weights running locally in a separate CPU worker; scores/evidence visible; offline comparison script | Evaluate MediaPipe recordings, tune on independent clips, determine whether fine-tuning is necessary; benchmark the Linux/Vultr runtime before deployment |
 
 The exact configuration locations and switches are in [SETUP.md](SETUP.md). The demo walkthrough and measurement limits are in [DEMO.md](DEMO.md). SMS is excluded as requested.

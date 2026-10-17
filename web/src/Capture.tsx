@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Camera,
   FileVideo,
-  LockKeyhole,
+  MonitorSmartphone,
   Pause,
   Play,
   Radio,
@@ -16,9 +16,11 @@ import {
   type Landmark,
   type PoseFrame,
   type Profile,
+  uid,
 } from "./api";
 import { Skeleton } from "./Skeleton";
 import { BaselinePanel } from "./Experience";
+import { ActionPanel } from "./ActionPanel";
 
 const center = (p: Landmark[]) => ({
   x: (p[23].x + p[24].x) / 2,
@@ -39,6 +41,7 @@ export function Capture({
   const [poses, setPoses] = useState<Landmark[][]>([]),
     [running, setRunning] = useState(false),
     [preview, setPreview] = useState(false);
+  const [modelStream, setModelStream] = useState<string | null>(null);
   const [selected, setSelected] = useState(-1),
     [status, setStatus] = useState("Camera is paused"),
     [result, setResult] = useState<IngestResult | null>(null);
@@ -69,7 +72,7 @@ export function Capture({
   const poseRef = useRef<Landmark[][]>([]),
     chosen = useRef<{ x: number; y: number } | null>(null),
     lost = useRef(false);
-  const session = useRef(crypto.randomUUID()),
+  const session = useRef(uid()),
     recording = useRef<PoseFrame[]>([]),
     timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const replayTime = useRef(0),
@@ -124,7 +127,7 @@ export function Capture({
     chosen.current = center(poseRef.current[index]);
     lost.current = false;
     setSelected(index);
-    session.current = crypto.randomUUID();
+    session.current = uid();
     recording.current = [];
     socket();
     setRunning(true);
@@ -133,6 +136,7 @@ export function Capture({
   const startVideo = async (file?: File) => {
     stop();
     setResult(null);
+    setModelStream(null);
     recording.current = [];
     setSimulatedAt(null);
     try {
@@ -222,6 +226,7 @@ export function Capture({
           demo_time_scale: 1,
         };
         sock.current.send(frame);
+        setModelStream(`${frame.person_id}:${frame.camera_id}:${frame.session_id}`);
         if (recording.current.length < 18000) recording.current.push(frame);
       };
       worker.current.postMessage({ type: "init" });
@@ -286,7 +291,8 @@ export function Capture({
       const frames = await api<PoseFrame[]>(
         `/demo/scenarios/${scenario}?person_id=${profile.id}&time_scale=${timeScale}`,
       );
-      session.current = crypto.randomUUID();
+      session.current = uid();
+      setModelStream(`${profile.id}:synthetic-demo:${session.current}`);
       socket();
       active.current = true;
       setRunning(true);
@@ -416,7 +422,7 @@ export function Capture({
             {source || "Capture device"}
           </span>
           <span className="camera-label">
-            <LockKeyhole size={12} /> On-device video
+            <MonitorSmartphone size={13} /> On-device video
           </span>
         </div>
         <div className="camera-bottom">
@@ -583,6 +589,7 @@ export function Capture({
           <strong>{result?.anomaly_score?.toFixed(2) ?? "Uncalibrated"}</strong>
         </div>
       </div>
+      <ActionPanel prediction={result?.action_prediction} streamId={modelStream} live />
       {result?.baseline_contributions?.length ? (
         <div className="baseline-reason">
           <strong>{result.baseline_state}</strong>

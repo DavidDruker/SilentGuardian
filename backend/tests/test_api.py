@@ -55,3 +55,28 @@ def test_demo_call_and_push_validation(client):
     b=client.post(f'/api/demo/call/{request}').json()
     assert a==b
     assert client.post('/api/push',json={'person_id':'daniel','contact_id':'son','endpoint':'http://127.0.0.1/private','keys':{'auth':'x','p256dh':'y'}}).status_code==422
+
+
+def test_vite_dev_origin_and_spaced_origin_lists(client, tmp_path, clock):
+    from fastapi.testclient import TestClient
+    from backend.app.config import Settings
+    from backend.app.main import create_app
+    assert client.post('/api/session',json={'token':'local-demo-only'},headers={'origin':'http://127.0.0.1:5173'}).status_code==200
+    cfg=Settings.model_construct(database_url=f'sqlite:///{tmp_path / "origins.db"}', worker_enabled=False,
+                                 allowed_origins='https://a.example, https://guardian.example/ ,')
+    with TestClient(create_app(cfg, clock=clock)) as other:
+        ok=other.post('/api/session',json={'token':'local-demo-only'},headers={'origin':'https://guardian.example'})
+        assert ok.status_code==200
+        assert other.post('/api/session',json={'token':'local-demo-only'},headers={'origin':'http://localhost:8000'}).status_code==403
+
+
+def test_production_allows_labelled_demo_but_never_weak_secrets():
+    import pytest
+    from backend.app.config import Settings
+    strong = dict(app_env='production', operator_token='o'*40, signing_secret='s'*40,
+                  public_url='https://guardian.example', demo_enabled=True)
+    Settings.model_construct(**strong).validate_runtime()
+    with pytest.raises(ValueError, match='secrets'):
+        Settings.model_construct(**{**strong, 'signing_secret': 'local-demo-signing-secret-change-before-deploy'}).validate_runtime()
+    with pytest.raises(ValueError, match='HTTPS'):
+        Settings.model_construct(**{**strong, 'public_url': 'http://guardian.example'}).validate_runtime()

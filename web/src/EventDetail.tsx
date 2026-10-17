@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Check, ExternalLink, MessageSquare, X } from "lucide-react";
 import { api, type GuardianEvent, type Landmark, type Profile } from "./api";
 import { Skeleton } from "./Skeleton";
+import { ActionPanel } from "./ActionPanel";
 
 export const urgencyNames = ["Info", "Watch", "Concern", "Urgent"];
 export const pretty = (s: string) => s.replaceAll("_", " ");
@@ -236,6 +237,7 @@ export function EventDetail({
             </p>
           </section>
         </div>
+        {event.action_prediction && <ActionPanel prediction={event.action_prediction} />}
         {Boolean(event.baseline_contributions?.length) && (
           <section>
             <h3>Personal baseline evidence</h3>

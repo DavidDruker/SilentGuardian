@@ -1,0 +1,992 @@
+{
+  "model": "stgcnpp-ntu60-2d-joint-20221228",
+  "checkpoint_sha256": "86e1e77a7b27dd53c6ccc1600a4cc3c321ec8e04d17f25a41fbbb7896026945a",
+  "preprocessing": "mediapipe33-coco17-xyv-linear100-2s-v1",
+  "source": "synthetic",
+  "threshold": 0.5,
+  "persistence_windows": 3,
+  "alert_authority": false,
+  "summaries": {
+    "synthetic": {
+      "normal_observed_seconds": 3.667,
+      "fall_clips": 1,
+      "model_detected_fall_clips": 1,
+      "rule_detected_fall_clips": 1,
+      "model_false_episodes": 0,
+      "model_false_episodes_per_observed_hour": 0.0
+    }
+  },
+  "clips": [
+    {
+      "label": "normal",
+      "split": "synthetic",
+      "recording": "normal",
+      "person_alias": null,
+      "angle": null,
+      "sha256": null,
+      "model_observed_seconds": 3.667,
+      "total_scored_windows": 18,
+      "model_windows": 12,
+      "max_fall_score": 0.0001353901025140658,
+      "model_episodes": 0,
+      "model_detected": false,
+      "rule_detected": false,
+      "model_onset_to_detection_s": null,
+      "rule_onset_to_detection_s": null,
+      "inference_median_ms": 87.69,
+      "inference_p95_ms": 120.97,
+      "windows": [
+        {
+          "at_seconds": 0.0,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.3333,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.6667,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.0,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.3333,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.6667,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.0,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 0.0001353901025140658,
+          "latency_ms": 120.97,
+          "top_action": {
+            "class_id": 4,
+            "label": "drop",
+            "score": 0.9756454229354858
+          }
+        },
+        {
+          "at_seconds": 2.3333,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 0.00012715838965959847,
+          "latency_ms": 85.64,
+          "top_action": {
+            "class_id": 4,
+            "label": "drop",
+            "score": 0.9762244820594788
+          }
+        },
+        {
+          "at_seconds": 2.6667,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 0.00011852265015477315,
+          "latency_ms": 112.29,
+          "top_action": {
+            "class_id": 4,
+            "label": "drop",
+            "score": 0.9768692851066589
+          }
+        },
+        {
+          "at_seconds": 3.0,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 0.00011123898002551869,
+          "latency_ms": 84.16,
+          "top_action": {
+            "class_id": 4,
+            "label": "drop",
+            "score": 0.977299690246582
+          }
+        },
+        {
+          "at_seconds": 3.3333,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 0.00010575076885288581,
+          "latency_ms": 77.91,
+          "top_action": {
+            "class_id": 4,
+            "label": "drop",
+            "score": 0.9775089025497437
+          }
+        },
+        {
+          "at_seconds": 3.6667,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 0.00010035587183665484,
+          "latency_ms": 78.23,
+          "top_action": {
+            "class_id": 4,
+            "label": "drop",
+            "score": 0.9778193831443787
+          }
+        },
+        {
+          "at_seconds": 4.0,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 9.606466483091936e-05,
+          "latency_ms": 79.4,
+          "top_action": {
+            "class_id": 4,
+            "label": "drop",
+            "score": 0.9780433177947998
+          }
+        },
+        {
+          "at_seconds": 4.3333,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 9.364156721858308e-05,
+          "latency_ms": 100.19,
+          "top_action": {
+            "class_id": 4,
+            "label": "drop",
+            "score": 0.9780282378196716
+          }
+        },
+        {
+          "at_seconds": 4.6667,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 9.366783342557028e-05,
+          "latency_ms": 106.45,
+          "top_action": {
+            "class_id": 4,
+            "label": "drop",
+            "score": 0.9776012897491455
+          }
+        },
+        {
+          "at_seconds": 5.0,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 9.548826346872374e-05,
+          "latency_ms": 85.08,
+          "top_action": {
+            "class_id": 4,
+            "label": "drop",
+            "score": 0.9769456386566162
+          }
+        },
+        {
+          "at_seconds": 5.3333,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 9.794702054932714e-05,
+          "latency_ms": 96.07,
+          "top_action": {
+            "class_id": 4,
+            "label": "drop",
+            "score": 0.976396381855011
+          }
+        },
+        {
+          "at_seconds": 5.6667,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 9.994689025916159e-05,
+          "latency_ms": 89.74,
+          "top_action": {
+            "class_id": 4,
+            "label": "drop",
+            "score": 0.9761655926704407
+          }
+        }
+      ]
+    },
+    {
+      "label": "fall",
+      "split": "synthetic",
+      "recording": "fall",
+      "person_alias": null,
+      "angle": null,
+      "sha256": null,
+      "model_observed_seconds": 3.667,
+      "total_scored_windows": 18,
+      "model_windows": 12,
+      "max_fall_score": 0.9163729548454285,
+      "model_episodes": 1,
+      "model_detected": true,
+      "rule_detected": true,
+      "model_onset_to_detection_s": 1.3333,
+      "rule_onset_to_detection_s": 0.6667000000000001,
+      "inference_median_ms": 105.55,
+      "inference_p95_ms": 114.77,
+      "windows": [
+        {
+          "at_seconds": 0.0,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.3333,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.6667,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.0,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.3333,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.6667,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.0,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 0.00011638414434855804,
+          "latency_ms": 96.61,
+          "top_action": {
+            "class_id": 4,
+            "label": "drop",
+            "score": 0.9763298034667969
+          }
+        },
+        {
+          "at_seconds": 2.3333,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 0.030608609318733215,
+          "latency_ms": 81.85,
+          "top_action": {
+            "class_id": 4,
+            "label": "drop",
+            "score": 0.6603567600250244
+          }
+        },
+        {
+          "at_seconds": 2.6667,
+          "rule_fall": true,
+          "quality": "good",
+          "fall_score": 0.6731818914413452,
+          "latency_ms": 108.7,
+          "top_action": {
+            "class_id": 42,
+            "label": "falling",
+            "score": 0.6731818914413452
+          }
+        },
+        {
+          "at_seconds": 3.0,
+          "rule_fall": true,
+          "quality": "good",
+          "fall_score": 0.883897602558136,
+          "latency_ms": 105.86,
+          "top_action": {
+            "class_id": 42,
+            "label": "falling",
+            "score": 0.883897602558136
+          }
+        },
+        {
+          "at_seconds": 3.3333,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 0.9163729548454285,
+          "latency_ms": 114.77,
+          "top_action": {
+            "class_id": 42,
+            "label": "falling",
+            "score": 0.9163729548454285
+          }
+        },
+        {
+          "at_seconds": 3.6667,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 0.7329825758934021,
+          "latency_ms": 105.63,
+          "top_action": {
+            "class_id": 42,
+            "label": "falling",
+            "score": 0.7329825758934021
+          }
+        },
+        {
+          "at_seconds": 4.0,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 0.09599647670984268,
+          "latency_ms": 113.85,
+          "top_action": {
+            "class_id": 31,
+            "label": "taking a selfie",
+            "score": 0.6755480766296387
+          }
+        },
+        {
+          "at_seconds": 4.3333,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 0.0005280087352730334,
+          "latency_ms": 105.47,
+          "top_action": {
+            "class_id": 31,
+            "label": "taking a selfie",
+            "score": 0.9762226343154907
+          }
+        },
+        {
+          "at_seconds": 4.6667,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 1.6320013855875004e-06,
+          "latency_ms": 99.94,
+          "top_action": {
+            "class_id": 31,
+            "label": "taking a selfie",
+            "score": 0.9983516931533813
+          }
+        },
+        {
+          "at_seconds": 5.0,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 1.6320013855875004e-06,
+          "latency_ms": 102.73,
+          "top_action": {
+            "class_id": 31,
+            "label": "taking a selfie",
+            "score": 0.9983516931533813
+          }
+        },
+        {
+          "at_seconds": 5.3333,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 1.6320013855875004e-06,
+          "latency_ms": 112.59,
+          "top_action": {
+            "class_id": 31,
+            "label": "taking a selfie",
+            "score": 0.9983516931533813
+          }
+        },
+        {
+          "at_seconds": 5.6667,
+          "rule_fall": false,
+          "quality": "good",
+          "fall_score": 1.6320013855875004e-06,
+          "latency_ms": 86.46,
+          "top_action": {
+            "class_id": 31,
+            "label": "taking a selfie",
+            "score": 0.9983516931533813
+          }
+        }
+      ]
+    },
+    {
+      "label": "normal",
+      "split": "synthetic",
+      "recording": "low_visibility",
+      "person_alias": null,
+      "angle": null,
+      "sha256": null,
+      "model_observed_seconds": 0.0,
+      "total_scored_windows": 90,
+      "model_windows": 0,
+      "max_fall_score": null,
+      "model_episodes": 0,
+      "model_detected": false,
+      "rule_detected": false,
+      "model_onset_to_detection_s": null,
+      "rule_onset_to_detection_s": null,
+      "inference_median_ms": null,
+      "inference_p95_ms": null,
+      "windows": [
+        {
+          "at_seconds": 0.0,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.0667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.1333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.2,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.2667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.3333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.4,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.4667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.5333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.6,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.6667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.7333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.8,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.8667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 0.9333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.0,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.0667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.1333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.2,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.2667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.3333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.4,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.4667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.5333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.6,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.6667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.7333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.8,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.8667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 1.9333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.0,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.0667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.1333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.2,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.2667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.3333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.4,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.4667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.5333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.6,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.6667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.7333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.8,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.8667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 2.9333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 3.0,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 3.0667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 3.1333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 3.2,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 3.2667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 3.3333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 3.4,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 3.4667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 3.5333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 3.6,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 3.6667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 3.7333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 3.8,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 3.8667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 3.9333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 4.0,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 4.0667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 4.1333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 4.2,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 4.2667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 4.3333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 4.4,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 4.4667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 4.5333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 4.6,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 4.6667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 4.7333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 4.8,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 4.8667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 4.9333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 5.0,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 5.0667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 5.1333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 5.2,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 5.2667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 5.3333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 5.4,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 5.4667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 5.5333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 5.6,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 5.6667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 5.7333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 5.8,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 5.8667,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        },
+        {
+          "at_seconds": 5.9333,
+          "rule_fall": false,
+          "quality": "uncertain",
+          "fall_score": null
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "No alert policy is changed by this report.",
+    "Synthetic data verifies execution only; it cannot establish accuracy.",
+    "Choose threshold on tuning clips; do not tune against held-out results.",
+    "Inference timing excludes camera, network, database and notification delivery.",
+    "MediaPipe visibility and two-second sampling differ from checkpoint training.",
+    "Class scores are not calibrated fall probabilities; no unknown/normal class exists."
+  ]
+}
