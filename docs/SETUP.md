@@ -3,9 +3,10 @@
 The local app works without cloud credentials. Real Gemini verdicts, Tiger Data persistence, Vultr hosting, web push, and phone calls have **not** been verified against external services. SMS is intentionally omitted. No resources have been purchased or provisioned.
 
 The optional ST-GCN++ classifier needs no provider credentials. Run
-`python scripts/dev.py --with-action-model --build` locally. Compose includes the
-CPU runtime and verified weights when `WITH_ACTION_MODEL=1` (its default).
-It records shadow predictions only. See [ACTION_MODEL.md](ACTION_MODEL.md).
+`python scripts/dev.py --with-action-model --build` locally. Compose packages it
+in the dedicated ML service. The default `DECISION_MODE=shadow` records predictions
+without gating alerts. See [ACTION_MODEL.md](ACTION_MODEL.md) and
+[the three-stage demo guide](THREE_STAGE_DEMO.md).
 
 ## Configuration locations
 
@@ -25,7 +26,7 @@ Phone numbers are never inferred from David's profile or account information. `D
 
 The Gemini default is `gemini-3.8-flash`, a stable model listed for new projects in [Google's model catalog](https://ai.google.dev/gemini-api/docs/models). The adapter follows the documented [Generate Content structured-output REST format](https://ai.google.dev/gemini-api/docs/generate-content/structured-output). Confirm access and measure its response time with the actual API project; the independent rule-based alert remains active during the 15-second AI deadline.
 
-Gemini receives category flags, detector metrics, event history and skeleton-rendered keyframes, not aliases, age, contact details, conditions or free-text care notes. This demo requires a confirmed billed project and explicit profile consent before sending. Google's [Gemini terms](https://ai.google.dev/gemini-api/terms) distinguish paid/unpaid data handling and prohibit clinical/medical-advice use; category reduction is data minimization, not anonymization. The app remains a staged, nonclinical demonstration. Consent revocation blocks pending requests; it cannot retract a request already sent.
+Gemini receives the profile's conditions, medication flags, mobility aid, age, care notes and category flags, plus detector metrics, recent events and skeleton-rendered keyframes. Aliases and contact details are excluded. This requires a confirmed billed project and explicit profile consent before sending. Google's [Gemini terms](https://ai.google.dev/gemini-api/terms) distinguish paid/unpaid data handling and prohibit clinical/medical-advice use. The app remains a nonclinical prototype. Consent revocation blocks pending requests; it cannot retract a request already sent.
 
 **Privacy → Delete** removes that profile's application rows, keyframes and baseline, leaves an empty consent-revocation marker, and attempts to refresh existing Tiger aggregates. The response reports whether aggregate refresh succeeded. Provider logs, local downloads and database backups are outside the app purge. Test deletion on a disposable staged profile before demonstrating it on Tiger.
 
@@ -43,9 +44,11 @@ The default persistent limits are five requests per UTC day and five minutes bet
 
 Treat $1,000 as the total maximum for this project until the user specifies currency and duration. Do not assume it is a monthly allowance. `TIGER_BUDGET_LIMIT=1000` displays that constraint; **it does not enforce a cloud billing cap**.
 
-Use one small Performance service for the demo, without replicas, IO boosts, support upgrades, or long-lived forks. Verify its region-specific quote, billing currency, tax, and any credits before provisioning. The official pricing page currently lists entry compute from $30/month and hourly consumption billing; this is an indicative starting point, not a quote for the chosen service. Storage and add-ons cost extra. Use the provider console's accrued charges and forecast, reserve headroom for taxes/currency, and stop expanding well below the total limit. Pause compute when the demo is idle; retained storage can still incur charges. Keep seven-day pose retention for this small demo, review actual growth, and remove disposable demo data only with the owner's authorization. See [Tiger Data pricing](https://www.tigerdata.com/pricing) and [service management](https://www.tigerdata.com/docs/use-timescale/latest/services/service-management/).
+Use one small Performance service for the demo, without replicas, IO boosts, support upgrades, or long-lived forks. Verify its region-specific quote, billing currency, tax, and any credits before provisioning. The official pricing page currently lists entry compute from $30/month and hourly consumption billing; this is an indicative starting point, not a quote for the chosen service. Storage and add-ons cost extra. Use the provider console's accrued charges and forecast, reserve headroom for taxes/currency, and stop expanding well below the total limit. Pause compute when the demo is idle; retained storage can still incur charges. The daily personalization job deletes completed-day pose windows after processing; monitor the smaller event database and remove disposable demo events only with the owner's authorization. See [Tiger Data pricing](https://www.tigerdata.com/pricing) and [service management](https://www.tigerdata.com/docs/use-timescale/latest/services/service-management/).
 
-The application stores profiles, events, verdict audits, notifications and acknowledgements in relational tables. Only `pose_windows` becomes a hypertable. Run these commands from the repo root after setting the actual Tiger connection string:
+The application stores profiles, candidates, events, verdict audits, notifications and acknowledgements in relational tables. `pose_windows` and `event_stage_log` become hypertables; `hourly_incidents` counts openings once per incident. Run these commands from the repo root after setting the actual Tiger connection string:
+
+Personalization runs automatically for the completed Toronto day by default. `PERSONALIZATION_PREVIOUS_WEIGHT=0.8` keeps 80% of the prior baseline and gives the new day 20%; `PERSONALIZATION_TIMEZONE=America/Toronto` controls the day boundary. Processed pose windows are deleted after the update. Events are separate relational records and remain available; their skeleton keyframes are cleared after the profile's configured retention period.
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.migrate_tiger
@@ -53,11 +56,11 @@ The application stores profiles, events, verdict audits, notifications and ackno
 .\.venv\Scripts\python.exe -m scripts.migrate_tiger --apply
 ```
 
-The first command is read-only. It checks the actual TimescaleDB version and `by_range` availability; the second creates the core schema, hypertable and hourly continuous aggregate. Syntax is based on [Tiger's hypertable API](https://www.tigerdata.com/docs/reference/timescaledb/hypertables/create_hypertable) and [continuous aggregates](https://www.tigerdata.com/docs/build/continuous-aggregates/create-a-continuous-aggregate), but must be verified against the provisioned service. Aggregate refresh excludes the current hour. Retention runs hourly in the app; do not use this single-process prototype for unattended clinical service.
+The first command is read-only. It checks the actual TimescaleDB version and `by_range` availability; the second creates the schema, hypertables and continuous aggregates, then backfills recent completed incident buckets. The Activity API combines those buckets with raw current-hour openings. Syntax is based on [Tiger's hypertable API](https://www.tigerdata.com/docs/reference/timescaledb/hypertables/create_hypertable) and [continuous aggregates](https://www.tigerdata.com/docs/build/continuous-aggregates/create-a-continuous-aggregate), but must be verified against the provisioned service. Retention runs hourly in the app; do not use this prototype for unattended clinical service.
 
 ## Vultr deployment
 
-Use a small Linux VM with Docker Engine and Compose, a domain pointing at it, and ingress for SSH from the operator's network plus ports 80/443. No GPU or Kubernetes is required for this demo. Do not expose port 8000 publicly. Set `.env` to production, disable synthetic replay, and generate strong secrets. The app checks these at startup.
+Use three private-network Linux instances for the app, rules and ML roles as described in [THREE_STAGE_DEMO.md](THREE_STAGE_DEMO.md). The local Compose file runs the same three roles on one machine for testing. Only the app node has a public domain and Caddy ingress; do not expose ports 8000–8002 publicly. Set `.env` to production, disable synthetic replay, and generate strong secrets. The app checks these at startup.
 
 ```sh
 docker compose --profile cloud up --build -d
@@ -66,8 +69,10 @@ docker compose exec guardian python -m scripts.migrate_tiger --apply
 curl --fail https://YOUR_DOMAIN/healthz
 ```
 
+These commands rehearse the three roles on one host. For three separate instances, run `compose.app.yaml`, `compose.rules.yaml` or `compose.ml.yaml` on the matching node (add `exec guardian` commands with `-f compose.app.yaml`), with the private endpoint settings in [THREE_STAGE_DEMO.md](THREE_STAGE_DEMO.md).
+
 Run **one API worker/replica**, as specified by the Dockerfile. The notification worker and camera ingestion share a local lock, with PostgreSQL event row locks as an additional guard. This intentionally does not claim multi-replica scheduling support. Caddy provides TLS and WebSocket proxying. Browser camera and push require a secure context (localhost works for local tests).
 
-For the hosted demonstration, run `APP_ENV=production` with `DEMO_ENABLED=true`. Production still refuses to start without unique 32+ character secrets and an HTTPS `PUBLIC_URL`, and sets the secure cookie flag. Synthetic replays stay labelled as synthetic; set `DEMO_ENABLED=false` to remove them. Real camera capture works in either mode.
+For the hosted MVP, run `APP_ENV=production` with `DEMO_ENABLED=false`. Production still refuses to start without unique 32+ character secrets and an HTTPS `PUBLIC_URL`, and sets the secure cookie flag. Set `DEMO_ENABLED=true` only when synthetic fixture replay is deliberately needed through the API. Camera and local video capture work with demo mode off.
 
 Acceptance after credentials arrive: verify health, apply the migration to the real service, run Margaret/Daniel scenarios, check the actual phone, acknowledge from a trusted-contact browser, restart the service and verify the event remains acknowledged. Docker is not installed in the current workstation, so the image and Compose deployment have not been executed here.

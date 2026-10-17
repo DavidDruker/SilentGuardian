@@ -11,7 +11,7 @@ from fastapi import Depends, HTTPException
 from sqlalchemy import delete, func, select, text
 
 from .baseline import FEATURES
-from .db import Audit, Event, Notification, Person, PersonalBaseline, ProfileVersion, PushSubscription, Stream, Window
+from .db import Audit, Candidate, CoverageHour, Event, EventStage, Notification, Person, PersonalBaseline, ProfileVersion, PushSubscription, Stream, Window
 from .gemini import event_package
 from .schemas import Profile, StrictModel
 
@@ -56,7 +56,7 @@ def register_adjustment_routes(app, g, operator):
         with db.sessions() as session:
             p = person_or_404(session, person_id)
             counts = {}
-            for model, name in ((Window, 'windows'), (Event, 'events'), (Stream, 'streams'), (ProfileVersion, 'profile_versions')):
+            for model, name in ((Window, 'windows'), (Candidate, 'candidates'), (EventStage, 'stages'), (CoverageHour, 'coverage'), (Event, 'events'), (Stream, 'streams'), (ProfileVersion, 'profile_versions')):
                 counts[name] = session.scalar(select(func.count()).select_from(model).where(model.person_id == person_id))
             counts['keyframes'] = sum(len(e.keyframes) for e in session.scalars(select(Event).where(Event.person_id == person_id)))
             return {'counts': counts, 'consent': p.body.get('consent', False), 'gemini_consent': p.body.get('gemini_consent', False)}
@@ -71,7 +71,7 @@ def register_adjustment_routes(app, g, operator):
             counts = {}
             counts['notifications'] = session.execute(delete(Notification).where(Notification.event_id.in_(events))).rowcount
             counts['audits'] = session.execute(delete(Audit).where((Audit.event_id.in_(events)) | (Audit.body['person_id'].as_string() == person_id))).rowcount
-            for model, name in ((Window, 'windows'), (Stream, 'streams'), (Event, 'events'),
+            for model, name in ((Window, 'windows'), (Candidate, 'candidates'), (EventStage, 'stages'), (CoverageHour, 'coverage'), (Stream, 'streams'), (Event, 'events'),
                                 (ProfileVersion, 'profile_versions'), (PushSubscription, 'subscriptions'), (PersonalBaseline, 'baselines')):
                 counts[name] = session.execute(delete(model).where(model.person_id == person_id)).rowcount
             # Keep only an empty revocation marker so startup cannot silently re-seed consent.
@@ -85,7 +85,7 @@ def register_adjustment_routes(app, g, operator):
         if db.engine.dialect.name == 'postgresql':
             try:
                 with db.engine.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
-                    for name in ('hourly_movement', 'daily_baseline'):
+                    for name in ('hourly_movement', 'daily_baseline', 'hourly_incidents'):
                         if conn.execute(text('SELECT to_regclass(:name)'), {'name': name}).scalar():
                             conn.execute(text(f"CALL refresh_continuous_aggregate('{name}', NULL::timestamptz, NULL::timestamptz)"))
                 aggregate_state = 'refreshed'
@@ -114,15 +114,46 @@ def register_adjustment_routes(app, g, operator):
         except ValueError as exc:
             raise HTTPException(422, str(exc))
 
-    @app.post('/api/baseline/{person_id}/refresh', dependencies=auth)
-    def refresh(person_id: str):
-        updated = g.baseline.refresh_current(person_id, g.clock())
-        return {'updated': updated, 'anchor_frozen': True, 'trigger_enabled': False,
-                'reason': 'Only unflagged or reviewed false-alarm windows qualify; a changed baseline needs fresh validation.'}
-
     @app.get('/api/trends/{person_id}', dependencies=auth)
     def trends(person_id: str):
         with db.sessions() as session:
+            person_or_404(session, person_id)
+            if db.engine.dialect.name == 'postgresql' and session.execute(text("SELECT to_regclass('daily_baseline')")).scalar():
+                baseline_row = session.get(PersonalBaseline, person_id)
+                # Recent complete buckets can lag the refresh policy. Aggregate
+                # yesterday and today from raw rows; older days use Tiger's view.
+                today = datetime.fromtimestamp(g.clock(), timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+                raw_start = today-timedelta(days=1)
+                older = session.execute(text('SELECT bucket, posture, synthetic, window_count, '
+                                             'mean_sway, sd_sway, mean_hip_speed, NULL::double precision AS sd_hip_speed '
+                                             'FROM daily_baseline WHERE person_id = :person AND bucket < :tail '
+                                             'ORDER BY bucket'), {'person': person_id, 'tail': raw_start}).all()
+                recent = session.execute(text("SELECT time_bucket(INTERVAL '1 day', ts) AS bucket, features->>'posture' AS posture, "
+                                              "COALESCE((features->>'synthetic_trend')::boolean, false) AS synthetic, "
+                                              "count(*) AS window_count, avg((features->>'sway')::double precision) AS mean_sway, "
+                                              "stddev_pop((features->>'sway')::double precision) AS sd_sway, "
+                                              "avg((features->>'hip_speed')::double precision) AS mean_hip_speed, "
+                                              "stddev_pop((features->>'hip_speed')::double precision) AS sd_hip_speed "
+                                              "FROM pose_windows WHERE person_id = :person AND ts >= :tail AND quality >= .8 "
+                                              "AND (COALESCE((features->>'baseline_eligible')::boolean, false) "
+                                              "OR COALESCE((features->>'synthetic_trend')::boolean, false)) "
+                                              "GROUP BY bucket, posture, synthetic ORDER BY bucket"),
+                                         {'person': person_id, 'tail': raw_start}).all()
+                points = []
+                for bucket, posture, synthetic, count, sway_mean, sway_sd, hip_mean, hip_sd in [*older, *recent]:
+                    for feature, value, deviation in (('sway', sway_mean, sway_sd), ('hip_speed', hip_mean, hip_sd)):
+                        if value is None:
+                            continue
+                        anchor = (.04 if synthetic and feature == 'sway' else .2 if synthetic else
+                                  baseline_row.anchor.get(posture, {}).get(feature, {}).get('median') if baseline_row else None)
+                        points.append({'day': bucket.date().isoformat(), 'posture': posture,
+                                       'feature': feature, 'mean': round(value, 4),
+                                       'stddev': round(deviation, 4) if deviation is not None else None,
+                                       'anchor': anchor, 'gap': round(value-anchor, 4) if anchor is not None else None,
+                                       'synthetic': synthetic, 'windows': count})
+                return {'points': points, 'aggregation': 'Tiger daily aggregate plus recent raw buckets',
+                        'database': 'PostgreSQL/Tiger Data',
+                        'note': 'Older hip-speed standard deviation is unavailable in the existing daily aggregate.'}
             rows = list(session.scalars(select(Window).where(Window.person_id == person_id).order_by(Window.ts)))
             b = session.get(PersonalBaseline, person_id)
             groups = defaultdict(list)

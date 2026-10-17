@@ -301,7 +301,10 @@ def test_tiger_migration_splits_statements_outside_comments():
     from pathlib import Path
     from scripts.migrate_tiger import statements
     parts = statements(Path('deploy/tiger.sql').read_text())
-    assert len(parts) == 5
+    assert len(parts) == 9
+    assert any("create_hypertable('event_stage_log'" in p for p in parts)
+    assert any("create_hypertable('monitoring_coverage'" in p for p in parts)
+    assert any('hourly_incidents' in p for p in parts)
     assert all(p.split()[0].upper() in ('SELECT', 'CREATE') and '--' not in p for p in parts)
     assert statements('-- a; b\nSELECT 1;\n-- c;\nSELECT 2;') == ['SELECT 1', 'SELECT 2']
 

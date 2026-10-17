@@ -12,6 +12,7 @@ from statistics import median
 
 from backend.app.action_model import ActionModel, CHECKPOINT_SHA256, MODEL_ID, PREPROCESSING
 from backend.app.detector import evaluate
+from backend.app.decision import decide
 from backend.app.replay import scenario_frames
 from backend.app.schemas import PoseFrame
 from backend.app.seed import demo_profiles
@@ -61,17 +62,25 @@ def score_clip(model, item, frames, threshold):
         if result is None:
             continue
         row = dict(at_seconds=round(frame.timestamp-frames[0].timestamp, 4),
-                   rule_fall='fall' in result['rule_hits'], quality=result['quality'])
+                   rule_fall='fall' in result['rule_hits'], rule_hits=result['rule_hits'],
+                   quality=result['quality'])
+        prediction = None
         try:
             prediction = model.predict(result['samples'])
             row.update(fall_score=prediction['fall_score'], latency_ms=prediction['latency_ms'],
                        top_action=prediction['top_actions'][0])
         except ValueError:
             row['fall_score'] = None
+        if result['rule_hits']:
+            floor = 3 if result['features'].get('still_seconds', 0) >= 120 else 2 if any(
+                hit in result['rule_hits'] for hit in ('fall', 'prolonged_stillness', 'restricted_standing', 'bed_exit')) else 1
+            decision = decide(result['rule_hits'], floor, prediction, threshold)
+            row.update(policy_action=decision.action, policy_reason=decision.reason)
         rows.append(row)
     count, active, episodes, observed, previous = 0, False, 0, 0., None
     onset = item.get('onset_seconds', 0)
-    first_model, first_rule = None, None
+    first_model, first_rule, first_policy = None, None, None
+    policy_episodes, policy_active = 0, False
     for row in rows:
         t, score = row['at_seconds'], row['fall_score']
         continuous = previous is not None and 0 < t-previous <= .75
@@ -85,6 +94,10 @@ def score_clip(model, item, frames, threshold):
             episodes += 1
         if flagged and t >= onset and first_model is None: first_model = t-onset
         if row['rule_fall'] and t >= onset and first_rule is None: first_rule = t-onset
+        policy_open = row.get('policy_action') in ('supported', 'fallback_open')
+        if policy_open and not policy_active: policy_episodes += 1
+        if policy_open and t >= onset and first_policy is None: first_policy = t-onset
+        policy_active = policy_open
         active = flagged
         previous = t if score is not None else None
     measured = [r for r in rows if r['fall_score'] is not None]
@@ -96,8 +109,10 @@ def score_clip(model, item, frames, threshold):
                 model_windows=len(measured), max_fall_score=max((r['fall_score'] for r in measured), default=None),
                 model_episodes=episodes, model_detected=first_model is not None,
                 rule_detected=first_rule is not None,
+                policy_episodes=policy_episodes, policy_detected=first_policy is not None,
                 model_onset_to_detection_s=first_model if item['label'] == 'fall' else None,
                 rule_onset_to_detection_s=first_rule if item['label'] == 'fall' else None,
+                policy_onset_to_detection_s=first_policy if item['label'] == 'fall' else None,
                 inference_median_ms=median(latencies) if latencies else None,
                 inference_p95_ms=latencies[min(len(latencies)-1, int(.95*len(latencies)))] if latencies else None,
                 windows=rows)
@@ -131,7 +146,9 @@ def main():
         summaries[split] = dict(normal_observed_seconds=seconds, fall_clips=len(falls),
             model_detected_fall_clips=sum(r['model_detected'] for r in falls),
             rule_detected_fall_clips=sum(r['rule_detected'] for r in falls),
+            policy_detected_fall_clips=sum(r['policy_detected'] for r in falls),
             model_false_episodes=sum(r['model_episodes'] for r in normal),
+            policy_false_episodes=sum(r['policy_episodes'] for r in normal),
             model_false_episodes_per_observed_hour=(sum(r['model_episodes'] for r in normal)*3600/seconds) if seconds else None)
     report = dict(model=MODEL_ID, checkpoint_sha256=CHECKPOINT_SHA256, preprocessing=PREPROCESSING,
         source='synthetic' if args.synthetic else 'reviewed staged recordings', threshold=args.threshold,

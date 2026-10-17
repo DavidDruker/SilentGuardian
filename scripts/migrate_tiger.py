@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from backend.app.config import settings
 from backend.app.db import Database
+from backend.app.service import Guardian
 
 
 def statements(sql):
@@ -29,10 +30,15 @@ def main():
         print('Read-only check complete. Review deploy/tiger.sql, then rerun with --apply.')
         return
     db.create()
+    Guardian(db, settings).backfill_stages()
     with db.engine.begin() as conn:
         for statement in statements(Path('deploy/tiger.sql').read_text()):
             conn.execute(text(statement))
-    print('Hypertable and hourly aggregate created. No paid infrastructure was provisioned by this script.')
+    with db.engine.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
+        conn.execute(text("CALL refresh_continuous_aggregate('hourly_incidents', NOW() - INTERVAL '8 days', date_trunc('hour', NOW()))"))
+        conn.execute(text("CALL refresh_continuous_aggregate('hourly_movement', NOW() - INTERVAL '2 days', date_trunc('hour', NOW()))"))
+        conn.execute(text("CALL refresh_continuous_aggregate('daily_baseline', NOW() - INTERVAL '8 days', date_trunc('day', NOW()))"))
+    print('Hypertables and continuous aggregates created; recent completed buckets backfilled.')
 
 
 if __name__=='__main__':main()

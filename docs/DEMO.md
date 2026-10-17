@@ -4,17 +4,17 @@ Use synthetic profiles and consenting team members. The supplied skeleton scenar
 
 ## Four-minute walkthrough
 
-1. Open **Care** with Margaret. Inspect her night assistance restriction. Replay **stumble**. The scenario timestamp is 02:10 in Toronto; the restriction and stumble share an event thread. The care assistant receives a simulated concern alert.
-2. Open the event, review rule hits and skeleton keyframes, then acknowledge. Pending sends are cancelled and the acknowledgement persists.
-3. Switch to **Personal** with Daniel. Replay the same **stumble**. A level 1 on-screen check-in appears. Press **I'm okay** to stop escalation, or leave it unanswered for the displayed response window (60 seconds at 1×, 7.5 seconds at 8×) to route to the first trusted contact.
-4. Replay **fall**. The rule-based concern opens immediately when the fall rule fires, without waiting for Gemini. Show the phone integration from the **Trusted circle** page (simulated until credentials are configured).
-5. Open the contact view from event detail on a phone. Its signed link grants only that event's minimal summary and acknowledgement, and expires after seven days. A localhost link needs an appropriate secure, reachable deployment before another device can open it.
+1. Create or select a consenting Care or Personal profile, then choose **Upload demo video**. Use the approved pre-recorded clip of a person walking, arching their back, and falling. No demo clip is bundled in this repository.
+2. Accept movement monitoring consent. Playback waits for MediaPipe to load, overlays the skeleton, and automatically selects the one visible person. If multiple people appear, select the intended person before playback resumes.
+3. At the end of playback, show the session-scoped verdict. The UI distinguishes an alert, a held/uncertain candidate, no alert, and no usable pose. A rules-only or model fallback result is labelled as such; do not present it as a validated ML/Gemini verdict.
+4. Open **Activity** to show the incident opening in the seven-day heat map and the ordered candidate, ML, Gemini, notification, and acknowledgement stages. A coverage dot means usable pose data was sent during that hour. Select the cell to filter the incident timeline.
+5. Open **Alerts** and acknowledge any real incident. Pending sends are cancelled. Use the profile's consent settings to ensure Gemini is enabled only when the billed project and the person's consent are available.
 
 ## Real camera and staged clips
 
-**Start camera** first presents consent and decline controls, then runs MediaPipe in a Web Worker. Skeleton-only is the default; raw local preview requires a logged override. Pixels outside the monitored area are masked before inference and out-of-area people are excluded from helper detection. Select the numbered person to enroll the monitored pose. Nearby helpers are considered only when their landmarks are visible. Identity uncertainty or occlusion requires selection again. A nearby helper is a heuristic, not proof of assistance. **Pause capture** stops camera tracks and the socket.
+**Start camera** first presents consent and decline controls, then runs MediaPipe in a Web Worker. Pixels outside the monitored area are masked before inference and out-of-area people are excluded from helper detection. Select the numbered person to enroll the monitored pose. Nearby helpers are considered only when their landmarks are visible. Identity uncertainty or occlusion requires selection again. A nearby helper is a heuristic, not proof of assistance. **Stop capture** stops camera tracks and the socket.
 
-**Local video** runs a video file through the same MediaPipe worker and authenticated pose socket. The file stays on the capture device. The download button exports only landmarks for inspection. This path supports staged team clips once they are recorded. No team video has been recorded by the agent. Prefer ordinary seated/standing movements or pre-approved staged clips; do not perform dangerous falls for the demo.
+**Upload demo video** runs a video file through the same MediaPipe worker and authenticated pose socket. The file stays on the capture device. This path supports staged team clips once they are recorded. No team video has been recorded by the agent. Use a pre-approved staged clip; do not perform dangerous falls for the demo.
 
 The included short **fall** fixture demonstrates immediate concern. The automated tests exercise continuous stillness at 30 seconds and 120 seconds with timestamped frames and an injectable clock. Missing observations reset the stillness interval. Notification escalation deadlines use server time and survive restart; sensor evidence uses observation time.
 
@@ -28,7 +28,7 @@ These measurements exclude camera inference, network transit, Gemini latency and
 
 The LSTM implementation has been replaced by robust per-posture median/MAD statistics. See [BASELINE.md](BASELINE.md) for calibration, feature contributions, the frozen anchor, independent evaluation and the trigger gate. No baseline is fitted without reviewed recordings.
 
-Use the labelled **8× simulated time** selector for the short rehearsal. **Long lie** supplies 130 seconds of continuous synthetic observations in roughly 16 seconds at target playback speed. A 60-second check-in becomes 7.5 seconds; fixed real-camera timings remain unchanged. The observed nighttime clock is visible. Rehearse actual wall-clock playback on the presentation machine because processing can extend it.
+The API retains a labelled 8× synthetic-time fixture for regression testing. **Long lie** supplies 130 seconds of synthetic observations in roughly 16 seconds at target replay speed. This accelerated path is not used for an uploaded person video; its timings remain real. Rehearse actual wall-clock playback on the presentation machine because processing can extend it.
 
 [ADJUSTMENTS.md](ADJUSTMENTS.md) maps the new requirements, privacy controls, rules/Gemini comparison and the evidence limits. Event detail is laid out as **What Hayvn noticed**, **What it cannot tell**, **Who was told** and **You decide**. **Real concern** and **False alarm** log human review. Dismissal stops that event's sends; continued long-lie evidence can open another event with a higher floor.
 

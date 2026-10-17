@@ -23,6 +23,7 @@ export function Skeleton({
   return (
     <svg
       viewBox="0 0 640 480"
+      preserveAspectRatio="none"
       className="skeleton"
       role="img"
       aria-label="Skeleton landmarks, with no video transmitted"

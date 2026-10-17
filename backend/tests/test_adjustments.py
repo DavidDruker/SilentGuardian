@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy import select
 
-from backend.app.baseline import FEATURES, fit_statistics, score_statistics, independent_records
-from backend.app.db import Audit, Event, PersonalBaseline, Window
+from backend.app.baseline import (FEATURES, blend_statistics, completed_day_cutoff,
+                                  fit_statistics, score_statistics, independent_records)
+from backend.app.db import Audit, CoverageHour, Event, PersonalBaseline, Window
 from backend.app.gemini import GeminiWorker, event_package
 from backend.app.notifications import NotificationWorker
 from backend.app.replay import scenario_frames
@@ -55,22 +56,49 @@ def test_baseline_requires_three_continuous_windows_and_keeps_rules(guardian):
     assert any(e.floor_urgency >= 2 and 'fall' in e.rule_hits for e in guardian.events())
 
 
-def test_current_update_freezes_anchor_and_excludes_flagged(guardian, clock):
+def test_daily_update_blends_previous_baseline_deletes_windows_and_keeps_events(guardian, clock):
     model = stats()
+    cutoff = completed_day_cutoff(clock(), 'America/Toronto')
+    old = cutoff.timestamp()-3600
+    profile = next(p for p in guardian.profiles() if p.id == 'daniel')
     with guardian.db.sessions.begin() as s:
         s.add(PersonalBaseline(person_id='daniel', anchor=model, current=model, threshold=3.5, trigger_enabled=True,
                                evidence={}, updated_at=clock()))
         for i in range(70):
             eligible = i < 35
-            s.add(Window(ts=datetime.fromtimestamp(clock()-150+i*2, timezone.utc), stream_id='observed',
+            s.add(Window(ts=datetime.fromtimestamp(old-150+i*2, timezone.utc), stream_id='observed',
                          person_id='daniel', quality=1, features={**features(.02 if eligible else 9), 'baseline_eligible': eligible},
                          rule_hits=[] if eligible else ['fall'], calibration=False, sequence=None))
-    assert guardian.baseline.refresh_current('daniel', clock())
+        s.add(Window(ts=datetime.fromtimestamp(cutoff.timestamp()+60, timezone.utc), stream_id='today',
+                     person_id='daniel', quality=1, features={**features(.5), 'baseline_eligible': True},
+                     rule_hits=[], calibration=False, sequence=None))
+        s.add(Window(ts=datetime.fromtimestamp(old-300, timezone.utc), stream_id='synthetic-trend:daniel',
+                     person_id='daniel', quality=1, features={**features(2), 'synthetic_trend': True},
+                     rule_hits=[], calibration=False, sequence=None))
+        s.add(Event(id='event-kept', person_id='daniel', stream_id='observed', profile=profile.model_dump(),
+                    source='live', opened_at=old, observed_at=old, updated_at=old,
+                    rule_hits=['fall'], floor_urgency=2, urgency=2, status='acknowledged',
+                    summary='Stored event', features={'sway': 9}, keyframes=[],
+                    verdict_status='rules_only', verdict=None, next_escalation_at=None))
+    result = guardian.baseline.daily_update(clock(), .8, 'America/Toronto')
+    assert result['trained_profiles'] == ['daniel'] and result['deleted_windows'] == 70
     with guardian.db.sessions() as s:
         b = s.get(PersonalBaseline, 'daniel')
         assert b.anchor['standing']['sway']['median'] == 0
-        assert b.current['standing']['sway']['median'] == .02
-        assert not b.trigger_enabled
+        assert b.current['standing']['sway']['median'] == pytest.approx(.004)
+        assert b.trigger_enabled
+        assert s.get(Event, 'event-kept').summary == 'Stored event'
+        assert {w.stream_id for w in s.scalars(select(Window))} == {'today', 'synthetic-trend:daniel'}
+        # The Activity grid still knows the purged hour was monitored.
+        assert [(c.person_id, c.windows) for c in s.scalars(select(CoverageHour))] == [('daniel', 70)]
+
+
+def test_statistical_blend_adds_new_posture_without_changing_inputs():
+    previous = stats()
+    daily = {'lying': {name: {'median': 1., 'mad': .2, 'scale': .2, 'count': 30} for name in FEATURES}}
+    blended = blend_statistics(previous, daily, .8)
+    assert blended['lying']['sway']['median'] == 1
+    assert 'lying' not in previous
 
 
 def test_reviewed_calibration_fits_and_preserves_first_anchor(client, clock):
@@ -85,8 +113,10 @@ def test_reviewed_calibration_fits_and_preserves_first_anchor(client, clock):
     fitted = client.post('/api/baseline/daniel/fit', json={'reviewed_normal':True})
     assert fitted.status_code == 200 and fitted.json()['anchor_frozen']
     with g.db.sessions.begin() as s:
-        for w in s.scalars(select(Window)):
-            w.features = features(.04)
+        assert not list(s.scalars(select(Window).where(Window.calibration == True)))
+        for i in range(64):
+            s.add(Window(ts=datetime.fromtimestamp(clock()-500-i*2, timezone.utc), stream_id=f'recalibration-{i//32}',
+                         person_id='daniel', quality=1, features=features(.04), rule_hits=[], calibration=True, sequence=None))
     assert client.post('/api/baseline/daniel/fit', json={'reviewed_normal':True}).status_code == 200
     b = client.get('/api/baseline/daniel').json()
     assert b['anchor']['standing']['sway']['median'] == .02
@@ -136,7 +166,7 @@ def test_dismissal_logged_but_continuous_long_lie_reopens(client):
     assert all(n.state not in ('pending','retry') for n in g.event(event.id).notifications)
 
 
-def test_gemini_package_is_categories_only_and_revocation_blocks_pending(guardian):
+def test_gemini_package_includes_care_context_and_revocation_blocks_pending(guardian):
     guardian.settings.gemini_api_key = 'test'
     guardian.settings.gemini_billed_project_confirmed = True
     p = next(p for p in guardian.profiles() if p.id == 'daniel')
@@ -145,7 +175,11 @@ def test_gemini_package_is_categories_only_and_revocation_blocks_pending(guardia
     with guardian.db.sessions() as s:
         package, refs = event_package(s.get(Event, guardian.events()[0].id), [])
     encoded = json.dumps(package)
-    assert all(secret not in encoded for secret in ('private-note-secret','BPPV','Orthostatic','Daniel','contacts','medication_flags'))
+    assert all(secret not in encoded for secret in ('Daniel','contacts'))
+    assert package['profile']['conditions'] == ['BPPV', 'Orthostatic hypotension']
+    assert package['profile']['care_notes'] == 'private-note-secret'
+    assert package['profile']['medication_flags'] == []
+    assert package['profile']['mobility_aid'] == 'none'
     assert package['profile']['risk_categories'] == ['balance_support']
     guardian.save_profile(p.model_copy(update={'gemini_consent':False}))
     worker = GeminiWorker(guardian)

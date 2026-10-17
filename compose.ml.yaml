@@ -1,0 +1,19 @@
+# guardian-ml node: ST-GCN++ CPU inference. The image downloads the official checkpoint.
+# Publishes only on this node's VPC address (PRIVATE_IP in .env); Vultr's firewall
+# does not filter VPC traffic, so never bind this port to 0.0.0.0.
+#   docker compose -f compose.ml.yaml up -d --build
+services:
+  ml:
+    build:
+      context: .
+      args:
+        WITH_ACTION_MODEL: 1
+    env_file: .env
+    command: ["python", "-m", "uvicorn", "backend.app.ml_api:app", "--host", "0.0.0.0", "--port", "8002", "--workers", "1"]
+    ports:
+      - "${PRIVATE_IP:?Set PRIVATE_IP in .env to this node's VPC address}:8002:8002"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/healthz')"]
+      interval: 30s
+      timeout: 5s
+    restart: unless-stopped

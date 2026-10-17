@@ -1,6 +1,21 @@
 -- Run only after scripts/migrate_tiger.py reports compatible provisioned service.
--- Core relational tables are created by SQLAlchemy. Only pose_windows is hypertabled.
+-- Core relational tables are created by SQLAlchemy. Time-series tables become hypertables here.
 SELECT create_hypertable('pose_windows', by_range('ts'), if_not_exists => TRUE, migrate_data => TRUE);
+SELECT create_hypertable('event_stage_log', by_range('ts'), if_not_exists => TRUE, migrate_data => TRUE);
+SELECT create_hypertable('monitoring_coverage', by_range('bucket'), if_not_exists => TRUE, migrate_data => TRUE);
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS hourly_incidents
+WITH (timescaledb.continuous) AS
+SELECT person_id, time_bucket(INTERVAL '1 hour', ts) AS bucket,
+       count(*) AS incident_count
+FROM event_stage_log
+WHERE stage = 'incident_opened' AND source <> 'demo_call'
+GROUP BY person_id, bucket
+WITH NO DATA;
+
+SELECT add_continuous_aggregate_policy('hourly_incidents',
+  start_offset => INTERVAL '8 days', end_offset => INTERVAL '1 hour',
+  schedule_interval => INTERVAL '1 hour', if_not_exists => TRUE);
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS hourly_movement
 WITH (timescaledb.continuous) AS

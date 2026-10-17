@@ -3,12 +3,44 @@ services:
     build:
       context: .
       args:
-        WITH_ACTION_MODEL: ${WITH_ACTION_MODEL:-1}
+        WITH_ACTION_MODEL: 0
     env_file: .env
+    environment:
+      RULES_SERVICE_URL: http://rules:8001
+      ML_SERVICE_URL: http://ml:8002
+    depends_on:
+      rules:
+        condition: service_healthy
+      ml:
+        condition: service_started
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
       - guardian_data:/app/data
+    restart: unless-stopped
+  rules:
+    build:
+      context: .
+      args:
+        WITH_ACTION_MODEL: 0
+    env_file: .env
+    command: ["python", "-m", "uvicorn", "backend.app.rules_api:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/healthz')"]
+      interval: 30s
+      timeout: 5s
+    restart: unless-stopped
+  ml:
+    build:
+      context: .
+      args:
+        WITH_ACTION_MODEL: 1
+    env_file: .env
+    command: ["python", "-m", "uvicorn", "backend.app.ml_api:app", "--host", "0.0.0.0", "--port", "8002", "--workers", "1"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/healthz')"]
+      interval: 30s
+      timeout: 5s
     restart: unless-stopped
   caddy:
     image: caddy:2-alpine

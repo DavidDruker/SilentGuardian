@@ -9,6 +9,7 @@ from sqlalchemy import select
 from .db import Audit, Event, Notification, PushSubscription
 from .security import contact_token
 from .service import event_scale
+from .stages import append_stage
 
 
 def valid_push_endpoint(endpoint):
@@ -106,6 +107,10 @@ class NotificationWorker:
             n.attempts += 1
             if g.settings.notification_mode == 'dry_run':
                 n.state, n.sent_at = 'simulated', now
+                append_stage(s, person_id=ev.person_id, candidate_id=ev.features.get('candidate_id'),
+                             event_id=ev.id, stage='notification_result', outcome='simulated',
+                             source=ev.source, when=now, urgency=ev.urgency,
+                             details={'channel': n.channel})
                 return None
             if n.channel == 'call':
                 day_start = datetime.fromtimestamp(now, timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
@@ -138,6 +143,7 @@ class NotificationWorker:
             n = s.get(Notification, nid, with_for_update=True)
             if n is None:
                 return  # Purged while the provider request was in flight.
+            ev = s.get(Event, n.event_id)
             # Error classes only: provider exceptions can contain phone numbers or secrets.
             if channel == 'call':
                 if error is None:
@@ -146,13 +152,28 @@ class NotificationWorker:
                     n.state, n.sent_at, n.last_error = 'configuration_required', None, str(error)
                 else:
                     n.state, n.last_error = 'unknown', f'{type(error).__name__}: inspect provider call log before retrying'
+                if ev:
+                    append_stage(s, person_id=ev.person_id, candidate_id=ev.features.get('candidate_id'),
+                                 event_id=ev.id, stage='notification_result', outcome=n.state,
+                                 source=ev.source, when=now, urgency=ev.urgency,
+                                 details={'channel': channel})
                 return
             if error is None:
                 n.state, n.sent_at = 'provider_accepted', now
+                if ev:
+                    append_stage(s, person_id=ev.person_id, candidate_id=ev.features.get('candidate_id'),
+                                 event_id=ev.id, stage='notification_result', outcome=n.state,
+                                 source=ev.source, when=now, urgency=ev.urgency,
+                                 details={'channel': channel})
                 return
             n.last_error = str(error) if isinstance(error, ValueError) else type(error).__name__
             n.state = 'retry'
             n.due_at = now+min(300, 15*2**min(n.attempts, 4))
+            if ev:
+                append_stage(s, person_id=ev.person_id, candidate_id=ev.features.get('candidate_id'),
+                             event_id=ev.id, stage='notification_result', outcome='retry',
+                             source=ev.source, when=now, urgency=ev.urgency,
+                             details={'channel': channel})
 
 
 def queue_demo_call(guardian, request_id):

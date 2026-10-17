@@ -32,7 +32,7 @@ def create_app(cfg: Settings = settings, db=None, clock=time.time):
     database = db or Database(cfg.database_url)
     guardian = Guardian(database, cfg, clock)
     notifications, gemini = NotificationWorker(guardian), GeminiWorker(guardian)
-    worker_health = {'notifications': None, 'gemini': None}
+    worker_health = {'notifications': None, 'gemini': None, 'personalization': None}
 
     async def notify_loop():
         while True:
@@ -52,10 +52,20 @@ def create_app(cfg: Settings = settings, db=None, clock=time.time):
                 log.error('Verdict worker failed: %s', type(exc).__name__)
             await asyncio.sleep(.5)
 
-    async def cleanup_loop():
+    async def maintenance_loop():
         while True:
+            try:
+                await asyncio.to_thread(
+                    guardian.baseline.daily_update,
+                    guardian.clock(),
+                    cfg.personalization_previous_weight,
+                    cfg.personalization_timezone,
+                )
+                await asyncio.to_thread(guardian.cleanup)
+                worker_health['personalization'] = time.time()
+            except Exception as exc:
+                log.error('Personalization worker failed: %s', type(exc).__name__)
             await asyncio.sleep(3600)
-            await asyncio.to_thread(guardian.cleanup)
 
     async def action_loop():
         await asyncio.to_thread(guardian.actions.load)
@@ -70,8 +80,10 @@ def create_app(cfg: Settings = settings, db=None, clock=time.time):
     @asynccontextmanager
     async def lifespan(app):
         database.create()
-        guardian.seed()
-        jobs = [asyncio.create_task(f()) for f in (notify_loop, verdict_loop, cleanup_loop, action_loop)] if cfg.worker_enabled else []
+        if cfg.demo_enabled:
+            guardian.seed()
+        guardian.backfill_stages()
+        jobs = [asyncio.create_task(f()) for f in (notify_loop, verdict_loop, maintenance_loop, action_loop)] if cfg.worker_enabled else []
         yield
         guardian.actions.close()
         for task in jobs:
@@ -111,7 +123,10 @@ def create_app(cfg: Settings = settings, db=None, clock=time.time):
         with database.sessions() as s:
             s.execute(text('SELECT 1'))
         healthy = not cfg.worker_enabled or worker_health['notifications'] is None or time.time()-worker_health['notifications'] < 30
-        return JSONResponse({'status': 'ok' if healthy else 'degraded', 'database': 'connected', 'notification_worker': worker_health['notifications']}, status_code=200 if healthy else 503)
+        return JSONResponse({'status': 'ok' if healthy else 'degraded', 'database': 'connected',
+                             'notification_worker': worker_health['notifications'],
+                             'personalization_worker': worker_health['personalization']},
+                            status_code=200 if healthy else 503)
 
     @app.get('/api/config')
     def config():
@@ -119,7 +134,10 @@ def create_app(cfg: Settings = settings, db=None, clock=time.time):
                 'gemini_configured': bool(cfg.gemini_api_key), 'push_public_key': cfg.vapid_public_key,
                 'calls_configured': bool(cfg.calls_enabled and cfg.demo_call_to and cfg.twilio_account_sid and cfg.twilio_auth_token and cfg.twilio_from_number),
                 'database': 'local SQLite' if cfg.database_url.startswith('sqlite') else 'PostgreSQL',
-                'personalization': 'median_mad', 'gemini_billed_project_confirmed': cfg.gemini_billed_project_confirmed,
+                'personalization': 'automatic_daily_weighted_median_mad',
+                'personalization_previous_weight': cfg.personalization_previous_weight,
+                'personalization_timezone': cfg.personalization_timezone,
+                'gemini_billed_project_confirmed': cfg.gemini_billed_project_confirmed,
                 'tiger_budget_limit': cfg.tiger_budget_limit}
 
     @app.post('/api/session')
@@ -168,6 +186,14 @@ def create_app(cfg: Settings = settings, db=None, clock=time.time):
     @app.get('/api/events', response_model=list[EventOut], dependencies=[Depends(operator)])
     def events(person_id: str | None = None):
         return guardian.events(person_id)
+
+    @app.get('/api/capture-result/{person_id}/{session_id}', dependencies=[Depends(operator)])
+    def capture_result(person_id: str, session_id: UUID):
+        """Return the verdict for one browser upload without mixing in older alerts."""
+        try:
+            return guardian.capture_result(person_id, str(session_id))
+        except KeyError:
+            raise HTTPException(404, 'Profile not found')
 
     @app.get('/api/events/{event_id}', response_model=EventOut, dependencies=[Depends(operator)])
     def event_detail(event_id: str):
@@ -337,6 +363,8 @@ def create_app(cfg: Settings = settings, db=None, clock=time.time):
 
     from .adjustments import register_adjustment_routes
     register_adjustment_routes(app, guardian, operator)
+    from .activity import register_activity_routes
+    register_activity_routes(app, guardian, operator)
     static = Path(__file__).resolve().parents[2] / 'web' / 'dist'
     if static.exists():
         app.mount('/', StaticFiles(directory=static, html=True), name='web')

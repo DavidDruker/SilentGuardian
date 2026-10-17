@@ -4,7 +4,7 @@ The October 17 adjustment document guides this implementation. It is not authori
 
 | Adjustment | Implemented locally | Remaining evidence |
 | --- | --- | --- |
-| Personal baseline | Six median/MAD features per posture, contribution explanations, frozen anchor, reviewed current update, persistent-trigger gate | Real calibration and independent held-out recordings |
+| Personal baseline | Six median/MAD features per posture, contribution explanations, frozen anchor, automatic daily 80/20 update, post-update pose-window deletion, persistent-trigger gate | Real calibration and independent held-out recordings |
 | Demo timing | Labelled 8× replay clock; 130-second long-lie fixture plays in roughly 16 seconds at target speed; replay check-in/escalation delays scale too | Rehearse on the presentation machine; inference/network delays may extend playback |
 | Bystanders and check-in | Pixels outside the chosen area masked before MediaPipe; out-of-area hips excluded on client and server; on-screen check-in | Test actual hall lighting, occlusion and camera angles |
 | Human oversight | Real concern/False alarm with audit; pending sends cancelled on dismissal; continued long-lie evidence can reopen a higher-floor alert | Staged harmless bends and real contact response |

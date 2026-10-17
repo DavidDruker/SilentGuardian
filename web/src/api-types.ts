@@ -141,6 +141,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/capture-result/{person_id}/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Capture Result
+         * @description Return the verdict for one browser upload without mixing in older alerts.
+         */
+        get: operations["capture_result_api_capture_result__person_id___session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/events/{event_id}": {
         parameters: {
             query?: never;
@@ -464,23 +484,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/baseline/{person_id}/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Refresh */
-        post: operations["refresh_api_baseline__person_id__refresh_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/trends/{person_id}": {
         parameters: {
             query?: never;
@@ -558,6 +561,57 @@ export interface paths {
         };
         /** Evidence */
         get: operations["evidence_api_evidence_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/activity/{person_id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Timeline */
+        get: operations["timeline_api_activity__person_id__timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/activity/{person_id}/cell": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Cell */
+        get: operations["cell_api_activity__person_id__cell_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/activity/{person_id}/heatmap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Heatmap */
+        get: operations["heatmap_api_activity__person_id__heatmap_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -851,7 +905,7 @@ export interface components {
              * @default live
              * @enum {string}
              */
-            source: "live" | "replay";
+            source: "live" | "replay" | "upload";
             /**
              * Demo Time Scale
              * @default 1
@@ -956,7 +1010,7 @@ export interface components {
              * @default synthetic
              * @enum {string}
              */
-            data_category: "synthetic" | "consenting_teammate";
+            data_category: "synthetic" | "consenting_teammate" | "real";
         };
         /** PurgeRequest */
         PurgeRequest: {
@@ -1256,6 +1310,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EventOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    capture_result_api_capture_result__person_id___session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                person_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -1871,37 +1957,6 @@ export interface operations {
             };
         };
     };
-    refresh_api_baseline__person_id__refresh_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                person_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     trends_api_trends__person_id__get: {
         parameters: {
             query?: never;
@@ -2042,6 +2097,113 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    timeline_api_activity__person_id__timeline_get: {
+        parameters: {
+            query: {
+                from_ts: number;
+                to_ts: number;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                person_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cell_api_activity__person_id__cell_get: {
+        parameters: {
+            query: {
+                day: string;
+                hour: number;
+                tz?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                person_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    heatmap_api_activity__person_id__heatmap_get: {
+        parameters: {
+            query?: {
+                tz?: string | null;
+                days?: number;
+            };
+            header?: never;
+            path: {
+                person_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

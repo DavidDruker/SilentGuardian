@@ -1,0 +1,19 @@
+# guardian-rules node: stateless, sensitive candidate rules. No database or Gemini access.
+# Publishes only on this node's VPC address (PRIVATE_IP in .env); Vultr's firewall
+# does not filter VPC traffic, so never bind this port to 0.0.0.0.
+#   docker compose -f compose.rules.yaml up -d --build
+services:
+  rules:
+    build:
+      context: .
+      args:
+        WITH_ACTION_MODEL: 0
+    env_file: .env
+    command: ["python", "-m", "uvicorn", "backend.app.rules_api:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]
+    ports:
+      - "${PRIVATE_IP:?Set PRIVATE_IP in .env to this node's VPC address}:8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/healthz')"]
+      interval: 30s
+      timeout: 5s
+    restart: unless-stopped

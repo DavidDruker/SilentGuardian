@@ -14,7 +14,7 @@ def offline_guardian():
     db.create()
     # Trusted built-in defaults only: never inherit future live .env credentials
     # or delivery switches when measuring synthetic fixtures.
-    g = Guardian(db, Settings.model_construct(worker_enabled=False))
+    g = Guardian(db, Settings.model_construct(worker_enabled=False, demo_enabled=True))
     g.seed()
     return g
 

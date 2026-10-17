@@ -2,15 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import {
   Camera,
   FileVideo,
-  MonitorSmartphone,
   Pause,
-  Play,
 } from "lucide-react";
 import {
   api,
   connectPose,
   type AppConfig,
   type IngestResult,
+  type GuardianEvent,
   type Landmark,
   type PoseFrame,
   type Profile,
@@ -23,15 +22,13 @@ const center = (p: Landmark[]) => ({
   y: (p[23].y + p[24].y) / 2,
 });
 
-const SCENARIOS: [string, string][] = [
-  ["stumble", "Stumble"],
-  ["fall", "Fall"],
-  ["long_lie", "Fall, then still"],
-  ["restricted_standing", "Standing without a helper at night"],
-  ["bed_exit", "Bed exit at night"],
-  ["normal", "Ordinary movement"],
-  ["low_visibility", "Low visibility"],
-];
+type CaptureResult = {
+  status: "reviewing" | "uncertain" | "ready";
+  scored_windows: number;
+  event: GuardianEvent | null;
+  candidate_decision: string | null;
+  decision_reason: string | null;
+};
 
 export function Capture({
   profile,
@@ -50,13 +47,14 @@ export function Capture({
   const [selected, setSelected] = useState(-1),
     [status, setStatus] = useState("Camera is paused"),
     [result, setResult] = useState<IngestResult | null>(null);
-  const [scenario, setScenario] = useState("stumble"),
-    [source, setSource] = useState("");
+  const [source, setSource] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [videoAspect, setVideoAspect] = useState(0);
+  const [verdict, setVerdict] = useState<CaptureResult | null>(null);
+  const [verdictBusy, setVerdictBusy] = useState(false);
   const video = useRef<HTMLVideoElement>(null),
     worker = useRef<Worker | null>(null),
     media = useRef<MediaStream | null>(null);
-  const [timeScale, setTimeScale] = useState(8),
-    [simulatedAt, setSimulatedAt] = useState<number | null>(null);
   const [region] = useState({
     x1: 0.15,
     y1: 0.05,
@@ -67,7 +65,6 @@ export function Capture({
     undefined,
   );
   const [sendGemini, setSendGemini] = useState(false),
-    [showRaw, setShowRaw] = useState(false),
     [consentBusy, setConsentBusy] = useState(false);
   const active = useRef(false),
     busy = useRef(false),
@@ -76,17 +73,20 @@ export function Capture({
   const poseRef = useRef<Landmark[][]>([]),
     chosen = useRef<{ x: number; y: number } | null>(null),
     lost = useRef(false);
-  const session = useRef(uid()),
-    timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const session = useRef(uid());
+  const recordedFrames = useRef<PoseFrame[]>([]);
+  const selectedRef = useRef(false),
+    finishing = useRef(false),
+    runId = useRef(0);
   const replayTime = useRef(0),
     lastVideoTime = useRef(-1),
     sourceRef = useRef(""),
     localUrl = useRef("");
 
   const stop = () => {
+    runId.current += 1;
     active.current = false;
     cancelAnimationFrame(raf.current);
-    clearTimeout(timer.current);
     sock.current?.close();
     sock.current = null;
     worker.current?.terminate();
@@ -99,13 +99,24 @@ export function Capture({
       video.current.removeAttribute("src");
     }
     if (localUrl.current) URL.revokeObjectURL(localUrl.current);
+    localUrl.current = "";
     chosen.current = null;
     lost.current = false;
     busy.current = false;
     setRunning(false);
     setPreview(false);
     setSelected(-1);
+    setPoses([]);
+    setResult(null);
+    setSource("");
+    setFileName("");
+    setVerdict(null);
+    setVerdictBusy(false);
+    setVideoAspect(0);
+    selectedRef.current = false;
+    finishing.current = false;
     setStatus("Camera is paused");
+    recordedFrames.current = [];
   };
   useEffect(() => () => stop(), []);
   useEffect(() => {
@@ -127,36 +138,92 @@ export function Capture({
   };
   const choose = (index: number) => {
     if (!poseRef.current[index]) return;
+    selectedRef.current = true;
     chosen.current = center(poseRef.current[index]);
     lost.current = false;
     setSelected(index);
     session.current = uid();
+    recordedFrames.current = [];
     socket();
     setRunning(true);
     setStatus("Tracking selected person");
   };
+  const finishUpload = async () => {
+    if (sourceRef.current !== "upload" || finishing.current) return;
+    finishing.current = true;
+    active.current = false;
+    cancelAnimationFrame(raf.current);
+    const thisRun = runId.current;
+    setRunning(false);
+    setVerdictBusy(true);
+    setStatus("Video complete · preparing verdict");
+    // Let the last MediaPipe frame and its WebSocket response finish before querying.
+    for (let i = 0; busy.current && i < 20; i++)
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    sock.current?.close();
+    worker.current?.terminate();
+    worker.current = null;
+    let last: CaptureResult | null = null;
+    try {
+      for (let i = 0; i < 20; i++) {
+        if (runId.current !== thisRun) return;
+        last = await api<CaptureResult>(`/capture-result/${profile.id}/${session.current}`);
+        setVerdict(last);
+        if (last.status !== "reviewing") break;
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
+      if (runId.current === thisRun) {
+        setVerdictBusy(false);
+        setStatus(last?.status === "reviewing" ? "Context review still pending" : last?.status === "uncertain" ? "Movement needs review" : "Verdict ready");
+        onEvent();
+      }
+    } catch (cause) {
+      if (runId.current === thisRun) {
+        setVerdictBusy(false);
+        onError(`Could not load the upload verdict: ${String(cause)}`);
+      }
+    }
+  };
+  const exportSkeleton = () => {
+    if (!recordedFrames.current.length) return;
+    const blob = new Blob([JSON.stringify({ kind: "skeleton-recording", frames: recordedFrames.current })],
+      { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `hayvn-skeleton-${session.current}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   const startVideo = async (file?: File) => {
     stop();
+    session.current = uid();
     setResult(null);
-    setSimulatedAt(null);
     try {
       setStatus("Loading local pose model…");
-      setSource(file ? "Local video replay" : "Live camera");
-      sourceRef.current = file ? "replay" : "live";
-      if (file && !config.demo_enabled)
-        throw new Error("Recorded replay is disabled in this deployment.");
+      setSource(file ? "Uploaded video" : "Live camera");
+      setFileName(file?.name || "");
+      sourceRef.current = file ? "upload" : "live";
       const element = video.current!;
       if (file) {
         localUrl.current = URL.createObjectURL(file);
         element.src = localUrl.current;
+        await new Promise<void>((resolve, reject) => {
+          if (element.readyState >= 1) { resolve(); return; }
+          element.onloadedmetadata = () => resolve();
+          element.onerror = () => reject(new Error("This video cannot be played in the browser"));
+          element.load();
+        });
+        setVideoAspect(element.videoWidth / element.videoHeight);
       } else {
         media.current = await navigator.mediaDevices.getUserMedia({
           video: { width: 640, height: 480, frameRate: { ideal: 24, max: 30 } },
           audio: false,
         });
         element.srcObject = media.current;
+        await element.play();
       }
-      await element.play();
       setPreview(true);
       active.current = true;
       lastVideoTime.current = -1;
@@ -169,7 +236,8 @@ export function Capture({
           return;
         }
         if (event.data.type === "ready") {
-          setStatus("Select the person to monitor");
+          setStatus(file ? "Analyzing video · waiting for person" : "Select the person to monitor");
+          if (file) void element.play();
           loop();
           return;
         }
@@ -185,6 +253,12 @@ export function Capture({
         );
         poseRef.current = detected;
         setPoses(detected);
+        if (sourceRef.current === "upload" && !selectedRef.current && detected.length === 1) {
+          choose(0);
+        } else if (sourceRef.current === "upload" && !selectedRef.current && detected.length > 1) {
+          element.pause();
+          setStatus("Select the person to monitor, then video will resume");
+        }
         if (!chosen.current || !sock.current) return;
         const distances = detected
           .map((p, i) => ({
@@ -221,20 +295,18 @@ export function Capture({
           })),
           monitored_track_id: "subject",
           tracking_ambiguous: lost.current,
-          source: sourceRef.current as "live" | "replay",
+          source: sourceRef.current as "live" | "upload",
           region,
           demo_time_scale: 1,
         };
-        sock.current.send(frame);
+        if (sock.current.send(frame) && sourceRef.current === "upload") recordedFrames.current.push(frame);
       };
       worker.current.postMessage({ type: "init" });
       const loop = async () => {
         if (!active.current) return;
         if (element.ended) {
-          setStatus("Video replay complete");
-          setRunning(false);
           active.current = false;
-          sock.current?.close();
+          void finishUpload();
           return;
         }
         if (
@@ -267,7 +339,7 @@ export function Capture({
       await api(`/privacy/${profile.id}/consent`, "POST", {
         accepted,
         gemini: accepted && sendGemini,
-        local_preview: accepted && showRaw,
+        local_preview: accepted,
       });
       const file = pendingCapture;
       setPendingCapture(undefined);
@@ -280,54 +352,6 @@ export function Capture({
       setConsentBusy(false);
     }
   };
-  const replay = async () => {
-    stop();
-    setResult(null);
-    if (!profile.consent)
-      return onError("Enable monitoring consent in the profile first.");
-    try {
-      const frames = await api<PoseFrame[]>(
-        `/demo/scenarios/${scenario}?person_id=${profile.id}&time_scale=${timeScale}`,
-      );
-      session.current = uid();
-      socket();
-      active.current = true;
-      setRunning(true);
-      setSource("Synthetic skeleton replay");
-      sourceRef.current = "replay";
-      let i = 0;
-      const tick = () => {
-        if (!active.current) return;
-        if (i >= frames.length) {
-          active.current = false;
-          setRunning(false);
-          sock.current?.close();
-          setStatus("Replay complete");
-          return;
-        }
-        const frame = frames[i];
-        frame.session_id = session.current;
-        if (sock.current?.send(frame)) {
-          setSimulatedAt(frame.timestamp);
-          setPoses(frame.poses.map((p) => p.landmarks));
-          setSelected(0);
-          i++;
-        }
-        const delay =
-          i < frames.length
-            ? Math.max(
-                20,
-                ((frames[i].timestamp - frame.timestamp) * 1000) / timeScale,
-              )
-            : 20;
-        timer.current = setTimeout(tick, delay);
-      };
-      tick();
-    } catch (e) {
-      onError(String(e));
-      stop();
-    }
-  };
   const trunk = result?.features?.trunk_angle,
     helper = result?.features?.helper_present,
     still = result?.features?.still_seconds;
@@ -335,40 +359,25 @@ export function Capture({
     <section className="panel capture-panel">
       <div className="panel-heading">
         <div>
-          <span className="eyebrow">CAPTURE</span>
-          <h2>Only body landmarks leave this device.</h2>
+          <span className="eyebrow">{profile.alias}</span>
+          <h2>Capture</h2>
         </div>
         <span className={`pill ${running ? "green" : ""}`}>
-          {running ? "Monitoring" : "Paused"}
+          {running ? "Monitoring" : verdictBusy ? "Reviewing" : verdict ? "Complete" : "Paused"}
         </span>
       </div>
-      <div className="camera-stage">
+      <div className="camera-stage" style={videoAspect ? {
+        aspectRatio: String(videoAspect),
+        width: videoAspect < 1.5 ? `min(100%, ${Math.round(560 * videoAspect)}px)` : undefined,
+      } : undefined}>
         <video
           ref={video}
           muted
           playsInline
-          className={
-            preview && showRaw ? "camera-video visible" : "camera-video"
-          }
-          onEnded={() => {
-            setRunning(false);
-            setStatus("Video replay complete");
-          }}
+          className={preview ? "camera-video visible" : "camera-video"}
+          onEnded={() => void finishUpload()}
         />
-        {(!preview || !showRaw) && <div className="room-grid" />}
-        {preview && (
-          <div
-            className="roi-mask"
-            style={{
-              left: `${region.x1 * 100}%`,
-              top: `${region.y1 * 100}%`,
-              width: `${(region.x2 - region.x1) * 100}%`,
-              height: `${(region.y2 - region.y1) * 100}%`,
-            }}
-          >
-            <span>Monitored area</span>
-          </div>
-        )}
+        {!preview && <div className="room-grid" />}
         {poses.length > 0 ? (
           <Skeleton poses={poses} selected={selected < 0 ? 0 : selected} />
         ) : (
@@ -377,11 +386,7 @@ export function Capture({
               <Camera size={32} />
             </div>
             <strong>Camera off</strong>
-            <span>
-              Start the camera or replay a demo scenario.
-              <br />
-              Video is processed on this device.
-            </span>
+            <span>Start the camera or select a video.</span>
           </div>
         )}
         <div className="camera-top">
@@ -389,11 +394,6 @@ export function Capture({
             <span className="dot" />
             {source || "Capture device"}
           </span>
-          {source !== "Synthetic skeleton replay" && (
-            <span className="camera-label">
-              <MonitorSmartphone size={13} /> On-device video
-            </span>
-          )}
         </div>
         <div className="camera-bottom">
           <span>{status}</span>
@@ -406,18 +406,17 @@ export function Capture({
           </span>
         </div>
       </div>
-      {preview && poses.length > 0 && (
+      {preview && poses.length > 0 && (sourceRef.current === "live" || (!selectedRef.current && poses.length > 1)) && (
         <div className="select-person">
           {poses.map((_, i) => (
             <button
               key={i}
               className={selected === i ? "small primary" : "small secondary"}
-              onClick={() => choose(i)}
+              onClick={() => { choose(i); if (sourceRef.current === "upload") void video.current?.play(); }}
             >
               Monitor person {i + 1}
             </button>
           ))}
-          <span>Select again if the person is hidden or paths cross.</span>
         </div>
       )}
       <div className="capture-actions">
@@ -428,10 +427,10 @@ export function Capture({
           }
         >
           {running || preview ? <Pause size={16} /> : <Camera size={16} />}
-          {running || preview ? "Pause capture" : "Start camera"}
+          {running || preview ? "Stop capture" : "Start camera"}
         </button>
         <label className="button secondary">
-          <FileVideo size={16} /> Local video
+          <FileVideo size={16} /> Upload demo video
           <input
             type="file"
             accept="video/*"
@@ -443,60 +442,19 @@ export function Capture({
           />
         </label>
       </div>
-      {config.demo_enabled && (
-        <div className="replay-controls">
-          <div>
-            <span className="eyebrow">DEMO SCENARIOS</span>
-            <p>Synthetic poses · same detection pipeline</p>
-          </div>
-          <select
-            aria-label="Replay scenario"
-            value={scenario}
-            onChange={(e) => setScenario(e.target.value)}
-          >
-            {SCENARIOS.map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="Demo time scale"
-            value={timeScale}
-            disabled={running}
-            onChange={(e) => setTimeScale(+e.target.value)}
-          >
-            <option value={8}>8× simulated time</option>
-            <option value={1}>Real-time replay</option>
-          </select>
-          <button
-            className="secondary"
-            onClick={replay}
-            disabled={running || !profile.consent}
-          >
-            <Play size={15} /> Replay
-          </button>
-        </div>
-      )}
-      {simulatedAt !== null && (
-        <div className="simulated-clock" role="status">
-          <strong>SIMULATED CLOCK · {timeScale}×</strong>
-          <span>
-            {new Date(simulatedAt * 1000).toLocaleTimeString([], {
-              timeZone: profile.timezone,
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-              hourCycle: "h23",
-            })}{" "}
-            · {profile.timezone}
-          </span>
-          <span>
-            Check-in window: {(profile.check_in_seconds || 60) / timeScale} s.
-            Real camera timing is unchanged.
-          </span>
-        </div>
-      )}
+      {fileName && <p className="capture-file">{fileName} · Video stays in this browser; pose landmarks are analyzed.</p>}
+      {(verdictBusy || verdict) && <section className="capture-verdict" aria-live="polite">
+        <span className="eyebrow">VIDEO VERDICT</span>
+        {verdictBusy && !verdict && <h3>Reviewing detected movement…</h3>}
+        {verdict?.event ? <>
+          <h3>{verdict.event.summary}</h3>
+          <p>Rule: {verdict.event.rule_hits.join(", ") || "none"} · Urgency level {verdict.event.urgency} · {verdict.status === "reviewing" ? "Context review pending" : verdict.event.verdict_status.replaceAll("_", " ")}</p>
+        </> : verdict && <>
+          <h3>{verdict.status === "uncertain" ? "Movement needs review" : verdict.scored_windows ? "No alert triggered by this video" : "No usable pose detected"}</h3>
+          <p>{verdict.status === "uncertain" ? `A rule candidate was held because ${verdict.decision_reason?.replaceAll("_", " ") || "the evidence was uncertain"}.` : verdict.scored_windows ? `${verdict.scored_windows} pose windows were scored${verdict.candidate_decision === "rejected" ? "; the model did not support the rule trigger" : ""}. This is a demo assessment, not a safety guarantee.` : "Try a clip where the full body is visible throughout the movement."}</p>
+        </>}
+        {verdict && recordedFrames.current.length > 0 && <button className="secondary small" onClick={exportSkeleton}>Download skeleton evidence</button>}
+      </section>}
       <div className="feature-strip">
         <div>
           <span>Posture</span>
@@ -527,42 +485,19 @@ export function Capture({
             aria-modal="true"
             aria-labelledby="consent-title"
           >
-            <span className="eyebrow">CONSENT RECORD</span>
-            <h2 id="consent-title">Consent before capture.</h2>
-            <p>
-              Use synthetic data or consenting teammates only. Video stays on
-              this device. Identifying skeleton landmarks and event keyframes
-              are stored by the server for {profile.retain_days} days. You can
-              pause capture or delete the stored data from Privacy.
-            </p>
-            <p>
-              Skeleton-only is the default. No microphone, raw video upload or
-              clinical use. This is not a medical device.
-            </p>
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={sendGemini}
-                onChange={(e) => setSendGemini(e.target.checked)}
-              />
-              Allow sending category flags and skeleton-rendered keyframes to
-              Gemini
-            </label>
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={showRaw}
-                onChange={(e) => setShowRaw(e.target.checked)}
-              />
-              Show my camera picture on this screen only (logged)
-            </label>
+            <h2 id="consent-title">Start monitoring?</h2>
+            <p>Movement measurements from {pendingCapture ? "this video" : "the camera"} will be stored with {profile.alias}'s profile.</p>
+            {config.gemini_configured && config.gemini_billed_project_confirmed && <label className="check-row">
+              <input type="checkbox" checked={sendGemini} onChange={(e) => setSendGemini(e.target.checked)} />
+              Allow Gemini to review flagged movement using this profile's care context
+            </label>}
             <div className="action-row">
               <button
                 className="secondary"
                 disabled={consentBusy}
-                onClick={() => consentCapture(false)}
+                onClick={() => setPendingCapture(undefined)}
               >
-                Decline and pause
+                Cancel
               </button>
               <button
                 className="primary"
@@ -573,7 +508,7 @@ export function Capture({
                 }
                 onClick={() => consentCapture(true)}
               >
-                I consent — start {pendingCapture ? "local video" : "camera"}
+                Start {pendingCapture ? "video" : "camera"}
               </button>
             </div>
           </section>

@@ -70,7 +70,7 @@ export function PrivacyPanel({ profile, onError, onChange }: Props) {
       <h2>Change consent or delete data.</h2>
       <p>
         Video stays on the capture device. Skeleton landmarks are identifying
-        movement data and are stored by this server. Category flags and
+        movement data and are stored by this server. Profile care context and
         skeleton-rendered keyframes may go to Gemini only with your explicit
         consent and a confirmed billed project. This demonstration is not a
         medical device.

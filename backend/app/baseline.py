@@ -2,10 +2,11 @@
 from collections import defaultdict
 from datetime import datetime, timezone
 from statistics import median
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
-from .db import PersonalBaseline, Window
+from .db import CoverageHour, PersonalBaseline, Window
 
 # Six directly observed features. Speeds are torso-normalized proxies, not gait diagnoses.
 # Floors regularize zero/near-zero MAD at the sensor's practical resolution.
@@ -63,6 +64,36 @@ def score_statistics(stats, features):
     return max((abs(r['z']) for r in contributions), default=0), contributions
 
 
+def blend_statistics(previous, daily, previous_weight=.8):
+    """Blend one completed day into the current baseline without moving the anchor."""
+    result = {posture: {name: dict(values) for name, values in features.items()}
+              for posture, features in previous.items()}
+    daily_weight = 1-previous_weight
+    for posture, features in daily.items():
+        if posture not in result:
+            result[posture] = {name: dict(values) for name, values in features.items()}
+            continue
+        for name, new in features.items():
+            old = result[posture].get(name)
+            if old is None:
+                result[posture][name] = dict(new)
+                continue
+            blended_median = previous_weight*old['median'] + daily_weight*new['median']
+            blended_mad = previous_weight*old['mad'] + daily_weight*new['mad']
+            result[posture][name] = {
+                'median': blended_median,
+                'mad': blended_mad,
+                'scale': max(blended_mad, FEATURES[name]),
+                'count': new['count'],
+            }
+    return result
+
+
+def completed_day_cutoff(now, timezone_name):
+    local = datetime.fromtimestamp(now, ZoneInfo(timezone_name))
+    return local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+
+
 def window_records(rows):
     return [{'session': r.stream_id, 'timestamp': r.ts.replace(tzinfo=timezone.utc).timestamp(), 'features': r.features}
             for r in rows if r.quality >= .8 and not r.features.get('synthetic_trend') and 'synthetic-demo' not in r.stream_id]
@@ -102,26 +133,75 @@ class BaselineEngine:
                     evidence={'anchor_created': now, 'reviewed_normal': True, 'validation': None,
                               'anchor_sessions': sorted({r['session'] for r in records}),
                               'current_sessions': sorted({r['session'] for r in records})}))
+            # The fitted statistics are enough for operation. Do not keep the raw
+            # calibration movement windows after they have been consumed.
+            session.execute(delete(Window).where(Window.person_id == person_id, Window.calibration == True))
         return {'postures': list(stats), 'trigger_enabled': False, 'anchor_frozen': True}
 
-    def refresh_current(self, person_id, now):
+    def daily_update(self, now, previous_weight=.8, timezone_name='America/Toronto'):
+        """Blend a completed local day into each baseline, then purge its windows.
+
+        Event rows contain their own evidence and are intentionally unaffected.
+        Synthetic fixtures and the current local day's data remain untouched.
+        """
+        cutoff = completed_day_cutoff(now, timezone_name)
+        local_zone = ZoneInfo(timezone_name)
+        summary = {'cutoff': cutoff.isoformat(), 'trained_profiles': [],
+                   'skipped_profiles': [], 'trained_days': [], 'skipped_days': [],
+                   'deleted_windows': 0,
+                   'previous_weight': previous_weight}
         with self.db.lock, self.db.sessions.begin() as session:
-            baseline = session.get(PersonalBaseline, person_id)
-            if not baseline:
-                return False
-            cutoff = datetime.fromtimestamp(now-7*86400, timezone.utc)
-            rows = list(session.scalars(select(Window).where(Window.person_id == person_id, Window.ts >= cutoff).order_by(Window.ts)))
-            eligible = [r for r in rows if r.features.get('baseline_eligible') and not r.features.get('synthetic_trend')]
-            stats = fit_statistics(window_records(eligible))
-            if not stats:
-                return False
-            baseline.current = {**baseline.current, **stats}
-            baseline.updated_at = now
-            # A new distribution needs its own validation before affecting alerts.
-            baseline.trigger_enabled = False
-            baseline.evidence = {**baseline.evidence, 'current_refreshed': now, 'validation': None,
-                                'current_sessions': sorted({r.stream_id for r in eligible})}
-            return True
+            filters = (
+                Window.ts < cutoff,
+                Window.calibration == False,
+                ~Window.stream_id.like('synthetic-trend:%'),
+                ~Window.stream_id.like('%:synthetic-demo:%'),
+            )
+            rows = list(session.scalars(select(Window).where(*filters).order_by(Window.person_id, Window.ts)))
+            grouped = defaultdict(list)
+            for row in rows:
+                observed = row.ts if row.ts.tzinfo else row.ts.replace(tzinfo=timezone.utc)
+                grouped[(row.person_id, observed.astimezone(local_zone).date())].append(row)
+            for (person_id, day), person_rows in sorted(grouped.items(), key=lambda item: item[0][1]):
+                baseline = session.get(PersonalBaseline, person_id)
+                eligible = [row for row in person_rows if row.features.get('baseline_eligible')]
+                records = window_records(eligible)
+                stats = fit_statistics(records) if baseline else {}
+                if stats:
+                    baseline.current = blend_statistics(baseline.current, stats, previous_weight)
+                    baseline.updated_at = now
+                    baseline.evidence = {
+                        **baseline.evidence,
+                        'last_daily_update': now,
+                        'last_daily_cutoff': cutoff.timestamp(),
+                        'last_daily_training_day': day.isoformat(),
+                        'daily_previous_weight': previous_weight,
+                        'daily_windows_used': len(independent_records(records)),
+                        'daily_postures': sorted(stats),
+                    }
+                    if person_id not in summary['trained_profiles']:
+                        summary['trained_profiles'].append(person_id)
+                    summary['trained_days'].append({'person_id': person_id, 'day': day.isoformat()})
+                else:
+                    if person_id not in summary['skipped_profiles']:
+                        summary['skipped_profiles'].append(person_id)
+                    summary['skipped_days'].append({'person_id': person_id, 'day': day.isoformat()})
+            # Keep hourly monitoring coverage for the Activity grid once the raw
+            # windows are gone; incident openings live in the stage log already.
+            coverage = defaultdict(int)
+            for row in rows:
+                if row.quality >= .8:
+                    observed = row.ts if row.ts.tzinfo else row.ts.replace(tzinfo=timezone.utc)
+                    coverage[(observed.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0), row.person_id)] += 1
+            for key, count in coverage.items():
+                kept = session.get(CoverageHour, key)
+                if kept:
+                    kept.windows += count
+                else:
+                    session.add(CoverageHour(bucket=key[0], person_id=key[1], windows=count))
+            if rows:
+                summary['deleted_windows'] = session.execute(delete(Window).where(*filters)).rowcount
+        return summary
 
 
 def evaluate_clips(stats, clips, threshold):

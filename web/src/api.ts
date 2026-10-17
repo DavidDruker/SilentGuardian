@@ -32,11 +32,14 @@ export async function api<T>(
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    throw new Error(
-      typeof data.detail === "string"
-        ? data.detail
-        : `Request failed (${response.status})`,
-    );
+    const detail = data.detail;
+    const validation = Array.isArray(detail)
+      ? detail.map((item: { loc?: (string | number)[]; msg?: string }) =>
+          `${item.loc?.slice(1).join(".") || "Profile"}: ${item.msg || "Invalid value"}`).join("; ")
+      : null;
+    throw new Error(validation || (typeof detail === "string"
+      ? detail
+      : `Request failed (${response.status})`));
   }
   return response.json();
 }

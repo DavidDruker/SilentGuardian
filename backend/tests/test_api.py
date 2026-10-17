@@ -17,6 +17,29 @@ def test_auth_validation_and_origin(client):
     assert client.post('/api/frames',json={}).status_code==422
 
 
+def test_real_profile_and_local_video_without_demo(tmp_path, clock):
+    from fastapi.testclient import TestClient
+    from backend.app.config import Settings
+    from backend.app.main import create_app
+    from backend.app.schemas import Profile
+
+    cfg = Settings.model_construct(database_url=f'sqlite:///{tmp_path / "real.db"}',
+                                   worker_enabled=False, demo_enabled=False)
+    with TestClient(create_app(cfg, clock=clock)) as app:
+        auth(app)
+        assert app.get('/api/profiles').json() == []
+        profile = Profile(id='real-person', alias='Test person', age=17, mode='personal',
+                          conditions=['Vertigo'], medication_flags=['May affect balance'],
+                          care_notes='Needs a handrail on stairs', data_category='consenting_teammate')
+        assert app.put('/api/profiles/real-person', json=profile.model_dump()).status_code == 200
+        saved = app.get('/api/profiles').json()[0]
+        assert saved['age'] == 17 and saved['conditions'] == ['Vertigo']
+        frame = next(scenario_frames('normal', 'daniel')).model_copy(
+            update={'person_id': 'real-person', 'source': 'upload'})
+        assert app.post('/api/frames', json=frame.model_dump()).status_code == 200
+        assert app.get('/api/demo/scenarios/normal?person_id=real-person').status_code == 404
+
+
 def test_websocket_reconnect_and_identity_binding(client):
     auth(client)
     frames=list(scenario_frames('fall','daniel'))

@@ -1,0 +1,28 @@
+# guardian-app node: UI/API, decision policy, Gemini, notifications, Tiger connection.
+# Set RULES_SERVICE_URL and ML_SERVICE_URL in .env to the other nodes' VPC addresses.
+#   docker compose -f compose.app.yaml up -d --build
+services:
+  guardian:
+    build:
+      context: .
+      args:
+        WITH_ACTION_MODEL: 0
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - guardian_data:/app/data
+    restart: unless-stopped
+  caddy:
+    image: caddy:2-alpine
+    profiles: [cloud]
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    restart: unless-stopped
+volumes:
+  guardian_data:
+  caddy_data:

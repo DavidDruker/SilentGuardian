@@ -289,6 +289,54 @@
         }
       }
     },
+    "/api/capture-result/{person_id}/{session_id}": {
+      "get": {
+        "summary": "Capture Result",
+        "description": "Return the verdict for one browser upload without mixing in older alerts.",
+        "operationId": "capture_result_api_capture_result__person_id___session_id__get",
+        "parameters": [
+          {
+            "name": "person_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Person Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/events/{event_id}": {
       "get": {
         "summary": "Event Detail",
@@ -1077,43 +1125,6 @@
         }
       }
     },
-    "/api/baseline/{person_id}/refresh": {
-      "post": {
-        "summary": "Refresh",
-        "operationId": "refresh_api_baseline__person_id__refresh_post",
-        "parameters": [
-          {
-            "name": "person_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Person Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/trends/{person_id}": {
       "get": {
         "summary": "Trends",
@@ -1272,6 +1283,235 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/activity/{person_id}/timeline": {
+      "get": {
+        "summary": "Timeline",
+        "operationId": "timeline_api_activity__person_id__timeline_get",
+        "parameters": [
+          {
+            "name": "person_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Person Id"
+            }
+          },
+          {
+            "name": "from_ts",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "From Ts"
+            }
+          },
+          {
+            "name": "to_ts",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "To Ts"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/activity/{person_id}/cell": {
+      "get": {
+        "summary": "Cell",
+        "operationId": "cell_api_activity__person_id__cell_get",
+        "parameters": [
+          {
+            "name": "person_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Person Id"
+            }
+          },
+          {
+            "name": "day",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Day"
+            }
+          },
+          {
+            "name": "hour",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Hour"
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tz"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/activity/{person_id}/heatmap": {
+      "get": {
+        "summary": "Heatmap",
+        "operationId": "heatmap_api_activity__person_id__heatmap_get",
+        "parameters": [
+          {
+            "name": "person_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Person Id"
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tz"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 7,
+              "title": "Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -1983,7 +2223,8 @@
             "type": "string",
             "enum": [
               "live",
-              "replay"
+              "replay",
+              "upload"
             ],
             "title": "Source",
             "default": "live"
@@ -2040,7 +2281,7 @@
           "age": {
             "type": "integer",
             "maximum": 120.0,
-            "minimum": 18.0,
+            "minimum": 0.0,
             "title": "Age",
             "default": 71
           },
@@ -2180,7 +2421,8 @@
             "type": "string",
             "enum": [
               "synthetic",
-              "consenting_teammate"
+              "consenting_teammate",
+              "real"
             ],
             "title": "Data Category",
             "default": "synthetic"

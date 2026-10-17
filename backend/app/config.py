@@ -1,4 +1,5 @@
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -11,11 +12,20 @@ class Settings(BaseSettings):
     signing_secret: str = 'local-demo-signing-secret-change-before-deploy'
     public_url: str = 'http://localhost:8000'
     allowed_origins: str = 'http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173,http://127.0.0.1:5173'
-    demo_enabled: bool = True
+    demo_enabled: bool = False
     worker_enabled: bool = True
     action_model_mode: str = 'shadow'
     action_model_path: str = 'models/stgcnpp-ntu60-2d.pth'
     action_model_threads: int = 2
+    rules_service_url: str = ''
+    ml_service_url: str = ''
+    internal_service_token: str = 'local-internal-demo-token'
+    decision_mode: str = 'shadow'
+    gate_validated: bool = False
+    fall_score_threshold: float = .5
+    model_timeout_seconds: float = 2
+    personalization_previous_weight: float = .8
+    personalization_timezone: str = 'America/Toronto'
     gemini_api_key: str = ''
     gemini_model: str = 'gemini-3.8-flash'
     gemini_timeout_seconds: float = 15
@@ -37,14 +47,28 @@ class Settings(BaseSettings):
     def validate_runtime(self):
         if self.action_model_mode not in ('off', 'shadow'):
             raise ValueError('ACTION_MODEL_MODE must be off or shadow; model alerts are not validated')
+        if self.decision_mode not in ('shadow', 'enforce'):
+            raise ValueError('DECISION_MODE must be shadow or enforce')
+        if self.decision_mode == 'enforce' and (not self.gate_validated or not self.ml_service_url):
+            raise ValueError('Enforced model gate requires GATE_VALIDATED and ML_SERVICE_URL')
+        if not 0 < self.fall_score_threshold < 1 or not .1 <= self.model_timeout_seconds <= 10:
+            raise ValueError('Model threshold or timeout is outside supported range')
         if not 1 <= self.action_model_threads <= 8:
             raise ValueError('ACTION_MODEL_THREADS must be between 1 and 8')
+        if not 0 <= self.personalization_previous_weight < 1:
+            raise ValueError('PERSONALIZATION_PREVIOUS_WEIGHT must be at least 0 and less than 1')
+        try:
+            ZoneInfo(self.personalization_timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError('PERSONALIZATION_TIMEZONE must be a valid IANA timezone') from exc
         if self.app_env == 'production':
             if len(self.operator_token) < 32 or len(self.signing_secret) < 32 or 'local-demo' in self.signing_secret:
                 raise ValueError('Production requires unique operator and signing secrets of at least 32 characters.')
             # Labelled synthetic replays may stay on for a hosted demo; secrets and HTTPS never relax.
             if not self.public_url.startswith('https://'):
                 raise ValueError('Production requires an HTTPS PUBLIC_URL.')
+            if (self.rules_service_url or self.ml_service_url) and len(self.internal_service_token) < 32:
+                raise ValueError('Production internal services require a unique token of at least 32 characters.')
         if self.notification_mode not in ('dry_run', 'live'):
             raise ValueError('NOTIFICATION_MODE must be dry_run or live')
         if self.database_url.startswith('sqlite'):

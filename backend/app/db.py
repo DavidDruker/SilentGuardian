@@ -116,6 +116,50 @@ class Audit(Base):
     body: Mapped[dict] = mapped_column(JSON)
 
 
+class EventStage(Base):
+    """Append-only, minimal time-series evidence for the incident pipeline."""
+    __tablename__ = 'event_stage_log'
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    person_id: Mapped[str] = mapped_column(String(64), index=True)
+    candidate_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    event_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    stage: Mapped[str] = mapped_column(String(40), index=True)
+    outcome: Mapped[str] = mapped_column(String(40))
+    urgency: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source: Mapped[str] = mapped_column(String(16))
+    policy_version: Mapped[str] = mapped_column(String(32), default='rules-shadow-v1')
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class CoverageHour(Base):
+    """Hourly monitoring coverage kept after the daily update purges pose windows."""
+    __tablename__ = 'monitoring_coverage'
+    bucket: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    person_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    windows: Mapped[int] = mapped_column(Integer)
+
+
+class Candidate(Base):
+    __tablename__ = 'candidates'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    person_id: Mapped[str] = mapped_column(String(64), index=True)
+    stream_id: Mapped[str] = mapped_column(String(200), index=True)
+    profile_version: Mapped[int] = mapped_column(Integer)
+    observed_at: Mapped[float] = mapped_column(Float, index=True)
+    created_at: Mapped[float] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(16))
+    quality: Mapped[str] = mapped_column(String(20))
+    rule_hits: Mapped[list] = mapped_column(JSON)
+    features: Mapped[dict] = mapped_column(JSON)
+    samples: Mapped[list] = mapped_column(JSON)
+    decision: Mapped[str] = mapped_column(String(30))
+    reason: Mapped[str] = mapped_column(String(100))
+    model_result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    event_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+
+
 class Database:
     def __init__(self, url: str):
         url = str(url)

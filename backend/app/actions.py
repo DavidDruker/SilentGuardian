@@ -6,12 +6,16 @@ windows rather than building a latency backlog. No inference runs under DB locks
 from collections import OrderedDict
 from datetime import datetime, timezone
 import json
+import hashlib
+import httpx
 from threading import RLock
 import time
 from uuid import uuid4
 
 from .action_model import ActionModel, MODEL_ID, PREPROCESSING, prepare_sequence
 from .db import Event, Person, Window
+from .stages import append_stage
+from .schemas import MLRequest
 
 
 class ActionWorker:
@@ -27,6 +31,9 @@ class ActionWorker:
 
     def load(self):
         if self.state == 'disabled' or self.closed:
+            return
+        if self.g.settings.ml_service_url:
+            self.state, self.error = 'ready', None
             return
         self.state = 'loading'
         try:
@@ -117,11 +124,25 @@ class ActionWorker:
 
     def tick(self):
         with self.lock:
-            if not self.pending or self.model is None or self.closed:
+            if not self.pending or (self.model is None and not self.g.settings.ml_service_url) or self.closed:
                 return False
             _, job = self.pending.popitem(last=False)
         try:
-            result = self.model.predict(job['samples'])
+            if self.g.settings.ml_service_url:
+                request_id = str(uuid4())
+                body = MLRequest(correlation_id=request_id, candidate_id=request_id,
+                                 idempotency_key=hashlib.sha256(
+                                     f"{job['stream_id']}:{job['samples'][-1]['t']:.6f}".encode()).hexdigest(),
+                                 profile_version=job['version'], observed_at=job['samples'][-1]['t'],
+                                 rule_hits=job['rule_hits'], quality='good', samples=job['samples'])
+                response = httpx.post(self.g.settings.ml_service_url.rstrip('/') + '/internal/predict',
+                                      json=body.model_dump(),
+                                      headers={'x-internal-token': self.g.settings.internal_service_token},
+                                      timeout=self.g.settings.model_timeout_seconds)
+                response.raise_for_status()
+                result = response.json()
+            else:
+                result = self.model.predict(job['samples'])
             result.update(rule_hits=job['rule_hits'], source=job['source'])
         except Exception:
             with self.lock:
@@ -150,6 +171,12 @@ class ActionWorker:
                 previous = json.loads(event.features.get('action_prediction_json', 'null'))
                 if previous is None or result['fall_score'] > previous['fall_score']:
                     event.features = {**event.features, 'action_prediction_json': encoded}
+                    append_stage(session, person_id=event.person_id,
+                                 candidate_id=event.features.get('candidate_id'), event_id=event.id,
+                                 stage='ml_result', outcome='shadow_scored', source=event.source,
+                                 when=self.g.clock(), urgency=event.urgency,
+                                 details={'model': result['model'], 'latency_ms': result['latency_ms'],
+                                          'fall_score': round(result['fall_score'], 4)})
             if record['result'] is None or record['result']['observed_at'] <= result['observed_at']:
                 record['result'] = result
             self.completed += 1

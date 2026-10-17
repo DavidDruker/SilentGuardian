@@ -1,6 +1,6 @@
 # Silent Guardian
 
-A working local movement-monitoring demo with equal Care and Personal flows: browser-local pose estimation, authenticated skeleton streaming, deterministic event detection, persistent alerts, acknowledgement, and optional Gemini, web push and ring-only phone calls.
+A local movement-monitoring MVP with Care and Personal modes: live metrics, camera or local-video capture, persistent alerts, acknowledgement, and optional Gemini assessment.
 
 ## Run
 
@@ -10,28 +10,28 @@ Requires Python 3.11+ and Node 20.19+ (Node 24 recommended). From this repositor
 python scripts/dev.py
 ```
 
-The launcher installs dependencies and the official MediaPipe model on first run, builds the UI, and serves **http://localhost:8000**. Choose **Open the local demo**. Later source edits can be rebuilt with `python scripts/dev.py --build`. Stop with Ctrl+C. Local data persists in ignored `data/guardian.db`.
+The launcher installs dependencies and the official MediaPipe model on first run, builds the UI, and serves **http://localhost:8000**. Sign in with the configured operator token (the local development default is `local-demo-only`), create a profile, then start the camera or choose a video. Later source edits can be rebuilt with `python scripts/dev.py --build`. Stop with Ctrl+C. Local data persists in ignored `data/guardian.db`.
 
-Two seeded synthetic profiles: Margaret in Care mode and Daniel in Personal mode. Replay **stumble** in both to see direct care-team routing versus a personal check-in. Open event detail to acknowledge, inspect evidence, or open the limited trusted-contact view. The **Care team** / **Trusted circle** page includes a ring-only phone test; delivery is simulated until configured. SMS is not included.
+Synthetic profiles and replay controls are off by default. Existing synthetic records in an older local database are hidden from the MVP UI, without deleting stored data. Set `DEMO_ENABLED=true` only for fixture-driven testing through the API.
 
 ## Configuration and current limits
 
 Copy `.env.example` to root `.env` when credentials are available. See [the exact configuration map](docs/SETUP.md), including the **$1,000 total Tiger Data budget**, phone allowlist, deployment steps and unverified external acceptance checks. No paid resources or real calls have been created.
 
-The app uses SQLite locally and PostgreSQL/Tiger Data through the same models. `deploy/tiger.sql` defines a pose-window hypertable and hourly aggregate. A single-process FastAPI server serves the React/Vite build and runs durable notification and verdict workers. Deployment files target a small Vultr VM with Caddy HTTPS. Run one API worker/replica.
+The app uses SQLite locally and PostgreSQL/Tiger Data through the same models. `deploy/tiger.sql` defines pose-window and event-stage hypertables with hourly aggregates. The app, rules, and ML services have separate entrypoints; the app alone runs Gemini and notification workers. The Compose file runs all three roles locally, while `compose.app.yaml`, `compose.rules.yaml` and `compose.ml.yaml` run one role per Vultr instance ([deployment guide](docs/THREE_STAGE_DEMO.md)). Run one app worker/replica.
 
 Live video stays on the browser. Two poses can be detected; the selected subject is tracked geometrically and ambiguity is surfaced. Quality-gated two-second windows are evaluated about three times per second. Current rules cover falls, stillness after a fall, stumbles, sustained sway, bed exits and restricted standing. They are starting heuristics, not validated health monitoring. Walker detection, real multi-person identity, clinical use, IP cameras and broad analytics remain outside this demo.
 
-Personalization uses an explainable median/MAD baseline per posture, a frozen calibration anchor, per-feature contributions and an evaluated three-window persistence gate. It remains score-only until held-out staged evidence passes. [Baseline collection and evaluation](docs/BASELINE.md) documents its assumptions and feature proxies. No trained baseline or clinical performance is claimed.
+Uploading a video plays the clip with a local MediaPipe skeleton overlay and shows a session-scoped verdict at the end; it does **not** train or fine-tune the action model. Gemini credentials enable contextual review only with consent. The Activity page shows incident openings, stage history, and monitoring coverage. After an initial reviewed calibration, the per-person statistical baseline updates automatically from each completed day of eligible normal activity. By default it keeps 80% of the previous baseline and gives the completed day 20%, then deletes the processed pose windows. See [baseline collection and evaluation](docs/BASELINE.md). No clinical performance is claimed.
 
-The [October 17 adjustments](docs/ADJUSTMENTS.md) also add an 8× simulated replay clock, monitored-area masking, consent/pause/delete controls, human Real concern/False alarm review, and a rules/Gemini second-assessment status in event detail. The synthetic Trends and Evidence screens were removed from the demo UI; their APIs and the measured limits remain in the docs.
+The earlier experimental controls and synthetic evidence remain available through the API where applicable; the MVP screen shows capture, metrics and alert actions.
 
 ## Verify
 
 The optional **ST-GCN++ backend classifier** runs in shadow mode with official
 pretrained weights. Use `python scripts/dev.py --with-action-model --build` to
-install it. Event detail shows the learned falling and staggering scores beside the rules;
-model predictions do not yet control alerts. [Model setup and evaluation](docs/ACTION_MODEL.md)
+install it. Predictions are recorded for evaluation but do not control alerts.
+[Model setup and evaluation](docs/ACTION_MODEL.md)
 documents the adapter, CPU runtime, licensing and validation limits.
 
 ```powershell
@@ -54,7 +54,7 @@ See [the verification record](docs/VERIFICATION.md) for completed local checks a
 | `backend/tests` | Integration and failure-path tests |
 | `backend/app/baseline.py` | Robust posture-specific statistics and frozen-anchor comparison |
 | `backend/app/action_model.py`, `actions.py` | Pretrained ST-GCN++ adapter and bounded shadow-inference worker |
-| `web/src` | Care station, Personal home, capture, profiles, event/contact views |
+| `web/src` | Monitoring dashboard, capture, profiles, alert/contact views |
 | `scripts` | Local launcher, schema export, replay evaluation, Tiger migration |
 | `deploy` | TLS proxy and Tiger Data SQL |
 

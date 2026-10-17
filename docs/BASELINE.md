@@ -8,14 +8,16 @@ The six features are lateral sway, hip speed, trunk angle, motion energy, wrist 
 
 For each feature, `z = 0.6745 × (value - median) / max(MAD, resolution_floor)`. The score is the largest absolute z-score. Each contribution includes the value, median, MAD, regularized scale and signed z-score. Near-zero medians produce no ratio. Resolution floors are exposed by the baseline API. An unseen posture is uncalibrated, not normal.
 
-The first reviewed calibration is the frozen anchor. Later fitting or **Update current from eligible windows** changes only the current statistics. Updates use quality-gated windows that were unflagged or explicitly reviewed as a false alarm, exclude synthetic trend examples, and reset trigger permission until re-evaluation. This is an explicit operator action rather than unattended learning.
+The first reviewed calibration is the frozen anchor. The current baseline then updates automatically after each completed local day. Eligible daily windows are quality-gated and either unflagged or explicitly reviewed as a false alarm; synthetic and uncertain activity is excluded. By default each update keeps 80% of the previous current baseline and gives the new day 20%. A previously validated trigger remains enabled while the frozen anchor remains available for comparison.
+
+After the daily update, all processed non-calibration pose windows are deleted, including windows that were rejected for training. Event rows are stored separately and are not deleted by this process: the event keeps its rule hits, peak features, keyframes, verdict, acknowledgement, notifications and audit history. Synthetic fixture rows and the current unfinished day are excluded from the purge. The worker checks hourly and uses `PERSONALIZATION_TIMEZONE` to determine the local day boundary.
 
 ## Collect and fit
 
 1. Use the capture consent screen and mark a clear monitored area. Only synthetic data or consenting teammates belong in this demonstration.
 2. Open **Personal calibration → Record calibration**. Aim for ten minutes over at least two separate capture sessions: six walking passes, eight sit-to-stands, five ordinary bends, a minute standing, a minute lying on a bed, and some turns and reaches. Include ordinary fast sitting. Do not perform dangerous falls for calibration.
-3. Stop calibration and review the recordings as normal. Select the review checkbox and **Fit personal baseline**. Calibration excludes rule-flagged and uncertain windows. Fitting keeps only non-overlapping two-second windows and needs at least 30 independent observations per supported posture and two sessions overall.
-4. Inspect the anchor/current medians and live feature contributions. The baseline is **score-only** until the gate below passes. Defaults are `k=3.5` and three consecutive scored windows; a missing/uncertain interval resets persistence.
+3. Stop calibration and review the recordings as normal. Export them first if they are needed for evaluation, then select the review checkbox and **Fit personal baseline**. Calibration excludes rule-flagged and uncertain windows. Fitting keeps only non-overlapping two-second observations, needs at least 30 per supported posture and two sessions overall, and deletes the consumed calibration windows.
+4. Inspect the anchor/current medians and live feature contributions. The baseline is **score-only** until the gate below passes. Defaults are `k=3.5` and three consecutive scored windows; a missing/uncertain interval resets persistence. No daily operator action is required after calibration.
 
 ## Tune and test separately
 

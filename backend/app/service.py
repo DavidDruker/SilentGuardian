@@ -1,17 +1,23 @@
 import time
 import json
 import threading
+import httpx
+import hashlib
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
-from .db import Audit, Event, Notification, Person, ProfileVersion, Stream, Window
+from .db import Audit, Candidate, Event, EventStage, Notification, Person, ProfileVersion, Stream, Window
 from .detector import evaluate
 from .baseline import BaselineEngine
 from .actions import ActionWorker
 from .schemas import EventOut, IngestResult, NotificationOut, Profile
 from .seed import demo_profiles
+from .stages import append_stage
+from .schemas import RulesRequest, RulesResponse
+from .schemas import MLRequest
+from .decision import decide, POLICY_VERSION
 
 
 LABELS = {'fall': 'Possible fall, assessing. Please check on the person.',
@@ -86,6 +92,19 @@ class Guardian:
                     s.add(Person(id=p.id, version=1, body=p.model_dump()))
                     s.add(ProfileVersion(person_id=p.id, version=1, body=p.model_dump(), created_at=self.clock(), author='Synthetic seed'))
 
+    def backfill_stages(self):
+        """Make pre-migration incidents visible in the new time-series activity view."""
+        with self.db.lock, self.db.sessions.begin() as s:
+            opened_ids = select(EventStage.event_id).where(EventStage.stage == 'incident_opened')
+            legacy = s.scalars(select(Event).where(Event.source != 'demo_call',
+                            Event.status != 'pending_review', Event.verdict_status != 'privacy_blocked',
+                            ~Event.id.in_(opened_ids)))
+            for ev in legacy:
+                append_stage(s, person_id=ev.person_id, candidate_id=ev.features.get('candidate_id'),
+                             event_id=ev.id, stage='incident_opened', outcome='legacy_backfill',
+                             source=ev.source, when=ev.opened_at, urgency=ev.urgency,
+                             policy_version='legacy-rules')
+
     def profiles(self):
         with self.db.sessions() as s:
             return [Profile.model_validate(p.body) for p in s.scalars(select(Person).order_by(Person.id))]
@@ -104,12 +123,49 @@ class Guardian:
             self.actions.clear_person(p.id)
             return Profile.model_validate(body)
 
+    def evaluate_rules(self, frame, profile, state, stream_id):
+        if not self.settings.rules_service_url:
+            return evaluate(frame, profile, state)
+        body = RulesRequest(correlation_id=stream_id, profile_version=profile.version,
+                            frame=frame, profile=profile, state=state)
+        try:
+            response = httpx.post(self.settings.rules_service_url.rstrip('/') + '/internal/evaluate',
+                                  json=body.model_dump(),
+                                  headers={'x-internal-token': self.settings.internal_service_token},
+                                  timeout=2)
+            response.raise_for_status()
+            scored = RulesResponse.model_validate(response.json())
+            if scored.correlation_id != stream_id:
+                raise ValueError('Rules response correlation mismatch')
+            return scored.state, scored.result, scored.reason
+        except httpx.HTTPError as exc:
+            raise ValueError('Rules service unavailable') from exc
+
+    def score_candidate(self, candidate, samples):
+        try:
+            body = MLRequest(correlation_id=candidate.id, candidate_id=candidate.id,
+                             idempotency_key=candidate.idempotency_key,
+                             profile_version=candidate.profile_version,
+                             observed_at=candidate.observed_at, rule_hits=candidate.rule_hits,
+                             quality=candidate.quality, samples=samples)
+            response = httpx.post(self.settings.ml_service_url.rstrip('/') + '/internal/predict',
+                                  json=body.model_dump(),
+                                  headers={'x-internal-token': self.settings.internal_service_token},
+                                  timeout=self.settings.model_timeout_seconds)
+            response.raise_for_status()
+            result = response.json()
+            if result.get('candidate_id') != candidate.id or result.get('profile_version') != candidate.profile_version:
+                return None
+            return result
+        except (httpx.HTTPError, ValueError):
+            return None
+
     def ingest(self, frame):
         now = self.clock()
-        if frame.source == 'replay' and not self.settings.demo_enabled:
-            raise ValueError('Synthetic replay is disabled')
         if frame.source == 'live' and abs(frame.timestamp-now) > 15:
             raise ValueError('Camera clock differs from server by more than 15 seconds')
+        if frame.source == 'replay' and not self.settings.demo_enabled:
+            raise ValueError('Synthetic replay is disabled')
         if frame.demo_time_scale != 1 and (frame.source != 'replay' or not self.settings.demo_enabled):
             raise ValueError('Accelerated time is only available for labelled demo replays')
         stream_id = f'{frame.person_id}:{frame.camera_id}:{frame.session_id}'
@@ -121,7 +177,7 @@ class Guardian:
             if not p.consent:
                 raise ValueError('Monitoring consent is paused')
             cached = self.stream_state(s, stream_id, p.id)
-            state, result, reason = evaluate(frame, p, cached['state'])
+            state, result, reason = self.evaluate_rules(frame, p, cached['state'], stream_id)
             cached['state'] = state
             if result is None:
                 self.checkpoint_stream(s, stream_id, cached, frame.timestamp, now)
@@ -155,24 +211,78 @@ class Guardian:
                            calibration=p.id in self.calibrating and window_ready and not hits and result['quality'] == 'good',
                            sequence=None))
             recent = s.scalar(select(Event).where(Event.stream_id == stream_id).order_by(Event.opened_at.desc()).limit(1))
-            active = recent if recent and recent.status == 'open' else None
+            active = recent if recent and recent.status in ('open', 'pending_review') else None
             ev = active
+            gate_prediction = None
             if hits:
                 floor = 3 if features.get('still_seconds', 0) >= 120 else 2 if any(h in hits for h in ('fall', 'prolonged_stillness', 'restricted_standing', 'bed_exit')) else 1
                 if p.mode == 'care' and 'stumble' in hits and p.mobility_aid != 'none':
                     floor = max(floor, 2)
                 cooldown = recent and now-recent.updated_at < 60/frame.demo_time_scale and set(hits).issubset(recent.rule_hits) and floor <= recent.floor_urgency
-                if not ev and not cooldown:
+                candidate_cooldown = (self.settings.decision_mode == 'enforce' and
+                                      frame.timestamp-state.get('last_candidate_at', -1e12) < 2)
+                if not ev and not cooldown and not candidate_cooldown:
+                    candidate_id = str(uuid4())
+                    idempotency_key = hashlib.sha256(
+                        f'{stream_id}:{frame.timestamp:.6f}:{p.version}'.encode()).hexdigest()
+                    candidate = Candidate(id=candidate_id, idempotency_key=idempotency_key,
+                                          person_id=p.id, stream_id=stream_id, profile_version=p.version,
+                                          observed_at=frame.timestamp, created_at=now, source=frame.source,
+                                          quality=result['quality'], rule_hits=list(hits), features=dict(features),
+                                          samples=list(samples), decision='shadow', reason='rules_shadow',
+                                          model_result=None, event_id=None)
+                    s.add(candidate)
+                    candidate_stages = [append_stage(s, person_id=p.id, candidate_id=candidate_id, event_id=None,
+                                 stage='candidate', outcome='rule_hit', source=frame.source, when=now,
+                                 urgency=floor, details={'rule_hits': hits},
+                                 policy_version=POLICY_VERSION if self.settings.decision_mode == 'enforce' else 'rules-shadow-v1')]
+                    model_result = None
+                    policy = None
+                    if self.settings.decision_mode == 'enforce':
+                        state['last_candidate_at'] = frame.timestamp
+                        cached['state'] = dict(state)
+                        model_result = self.score_candidate(candidate, samples)
+                        gate_prediction = model_result
+                        policy = decide(hits, floor, model_result, self.settings.fall_score_threshold)
+                        candidate.decision, candidate.reason, candidate.model_result = policy.action, policy.reason, model_result
+                        candidate_stages.append(append_stage(s, person_id=p.id, candidate_id=candidate_id, event_id=None,
+                                     stage='ml_result', outcome='scored' if model_result else 'unavailable',
+                                     source=frame.source, when=now, urgency=floor,
+                                     policy_version=POLICY_VERSION,
+                                     details={'model': model_result.get('model') if model_result else None,
+                                              'latency_ms': model_result.get('latency_ms') if model_result else None}))
+                        candidate_stages.append(append_stage(s, person_id=p.id, candidate_id=candidate_id, event_id=None,
+                                     stage='candidate_decision', outcome=policy.action,
+                                     source=frame.source, when=now, urgency=floor,
+                                     policy_version=POLICY_VERSION, details={'reason': policy.reason}))
                     keys = result['samples']
                     keyframes = [{'timestamp': x['t'], 'landmarks': x['landmarks']} for x in (keys[0], keys[len(keys)//2], keys[-1])] if keys else []
-                    ev = Event(id=str(uuid4()), person_id=p.id, stream_id=stream_id, profile=p.model_dump(),
-                               source=frame.source, opened_at=now, observed_at=frame.timestamp, updated_at=now,
-                               rule_hits=hits, floor_urgency=floor, urgency=floor, status='open', summary=LABELS[hits[0]],
-                               features=features, keyframes=keyframes, verdict_status='pending' if self.settings.gemini_api_key else 'rules_only',
-                               next_escalation_at=now+(p.check_in_seconds if floor == 1 and p.mode == 'personal' and p.check_in_first else 180)/frame.demo_time_scale)
-                    s.add(ev)
-                    s.flush()
-                    self.queue(s, ev, now)
+                    if policy is None or policy.action in ('supported', 'fallback_open'):
+                        review = bool(self.settings.gemini_api_key and self.settings.gemini_billed_project_confirmed
+                                      and p.gemini_consent)
+                        provisional = bool(policy and policy.action == 'supported' and review)
+                        verdict_status = ('pending' if provisional or (policy is None and self.settings.gemini_api_key)
+                                          else 'model_fallback' if policy and policy.action == 'fallback_open'
+                                          else 'model_supported_no_gemini' if policy else 'rules_only')
+                        ev = Event(id=str(uuid4()), person_id=p.id, stream_id=stream_id, profile=p.model_dump(),
+                                   source=frame.source, opened_at=now, observed_at=frame.timestamp, updated_at=now,
+                                   rule_hits=hits, floor_urgency=floor, urgency=floor,
+                                   status='pending_review' if provisional else 'open', summary=LABELS[hits[0]],
+                                   features={**features, 'candidate_id': candidate_id,
+                                             **({'action_prediction_json': json.dumps(model_result)} if model_result else {})},
+                                   keyframes=keyframes, verdict_status=verdict_status,
+                                   next_escalation_at=now+(p.check_in_seconds if floor == 1 and p.mode == 'personal' and p.check_in_first else 180)/frame.demo_time_scale)
+                        s.add(ev)
+                        s.flush()
+                        candidate.event_id = ev.id
+                        for stage_row in candidate_stages:
+                            stage_row.event_id = ev.id
+                        if not provisional:
+                            append_stage(s, person_id=p.id, candidate_id=candidate_id, event_id=ev.id,
+                                         stage='incident_opened', outcome=policy.action if policy else 'rules_shadow',
+                                         source=frame.source, when=now, urgency=floor,
+                                         policy_version=policy.policy_version if policy else 'rules-shadow-v1')
+                            self.queue(s, ev, now)
                 elif ev:
                     old = ev.urgency
                     ev.rule_hits = list(dict.fromkeys(ev.rule_hits+hits))
@@ -184,9 +294,11 @@ class Guardian:
                         self.queue(s, ev, now)
             if ev and result['quality'] == 'good':
                 ev.features = event_features(ev.features, features)
-            prediction = self.actions.observe(stream_id, p, samples, result['quality'],
-                                              ev.id if ev else None, hits,
-                                              'synthetic' if frame.camera_id == 'synthetic-demo' else frame.source)
+            prediction = (gate_prediction or {'status': 'not_requested', 'mode': 'enforce'}
+                          if self.settings.decision_mode == 'enforce' else
+                          self.actions.observe(stream_id, p, samples, result['quality'],
+                                               ev.id if ev else None, hits,
+                                               'synthetic' if frame.camera_id == 'synthetic-demo' else frame.source))
             return IngestResult(accepted=True, reason=reason, quality=result['quality'], features=features,
                                 rule_hits=hits, event_id=ev.id if ev else None, anomaly_score=baseline['score'], anchor_score=baseline['anchor_score'],
                                 baseline_contributions=baseline['contributions'], baseline_state=baseline['state'],
@@ -213,6 +325,9 @@ class Guardian:
             due = now if ev.urgency == 3 else max(now, ev.opened_at+c['delay_seconds']/event_scale(ev))
             s.add(Notification(id=nid, event_id=ev.id, recipient=c['name'], contact_id=c['id'], channel=c['channel'],
                                urgency=ev.urgency, due_at=due, state='pending', attempts=0))
+            append_stage(s, person_id=ev.person_id, candidate_id=ev.features.get('candidate_id'),
+                         event_id=ev.id, stage='notification_queued', outcome=c['channel'],
+                         source=ev.source, when=now, urgency=ev.urgency)
 
     def acknowledge(self, event_id, author, note):
         with self.event_lock(event_id), self.db.lock, self.db.sessions.begin() as s:
@@ -225,6 +340,9 @@ class Guardian:
                 for n in s.scalars(select(Notification).where(Notification.event_id == ev.id, Notification.state.in_(['pending', 'retry']))):
                     n.state = 'cancelled'
                 s.add(Audit(id=str(uuid4()), event_id=ev.id, ts=self.clock(), kind='acknowledgement', body={'author': author, 'note': note}))
+                append_stage(s, person_id=ev.person_id, candidate_id=ev.features.get('candidate_id'),
+                             event_id=ev.id, stage='acknowledged', outcome='acknowledged',
+                             source=ev.source, when=self.clock(), urgency=ev.urgency)
             return ev.id
 
     def event_out(self, s, ev):
@@ -247,7 +365,7 @@ class Guardian:
 
     def events(self, person_id=None):
         with self.db.sessions() as s:
-            q = select(Event).order_by(Event.opened_at.desc()).limit(100)
+            q = select(Event).where(Event.status != 'pending_review').order_by(Event.opened_at.desc()).limit(100)
             if person_id:
                 q = q.where(Event.person_id == person_id)
             return [self.event_out(s, ev) for ev in s.scalars(q)]
@@ -259,12 +377,31 @@ class Guardian:
                 raise KeyError(event_id)
             return self.event_out(s, ev)
 
+    def capture_result(self, person_id, session_id):
+        stream_id = f'{person_id}:browser-camera:{session_id}'
+        with self.db.sessions() as s:
+            if s.get(Person, person_id) is None:
+                raise KeyError(person_id)
+            windows = s.scalar(select(func.count()).select_from(Window).where(
+                Window.stream_id == stream_id)) or 0
+            ev = s.scalar(select(Event).where(Event.stream_id == stream_id,
+                                              Event.source == 'upload').order_by(Event.opened_at.desc()).limit(1))
+            candidate = s.scalar(select(Candidate).where(Candidate.stream_id == stream_id).order_by(Candidate.observed_at.desc()).limit(1))
+            return {'session_id': session_id, 'scored_windows': windows,
+                    'status': 'reviewing' if ev and ev.status == 'pending_review' else
+                              'uncertain' if not ev and candidate and candidate.decision == 'hold' else 'ready',
+                    'candidate_decision': candidate.decision if candidate else None,
+                    'decision_reason': candidate.reason if candidate else None,
+                    'event': self.event_out(s, ev).model_dump() if ev else None}
+
     def cleanup(self):
         now = self.clock()
         with self.db.lock, self.db.sessions.begin() as s:
             for p in s.scalars(select(Person)):
                 cutoff = datetime.fromtimestamp(now-p.body['retain_days']*86400, timezone.utc)
                 s.execute(delete(Window).where(Window.person_id == p.id, Window.ts < cutoff))
+                s.execute(delete(Candidate).where(Candidate.person_id == p.id, Candidate.observed_at < cutoff.timestamp()))
+                s.execute(delete(EventStage).where(EventStage.person_id == p.id, EventStage.ts < cutoff))
                 s.execute(delete(Stream).where(Stream.person_id == p.id, Stream.updated_at < now-86400))
                 for ev in s.scalars(select(Event).where(Event.person_id == p.id, Event.opened_at < cutoff.timestamp())):
                     ev.keyframes = []

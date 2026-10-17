@@ -30,7 +30,7 @@ class PoseFrame(StrictModel):
     poses: list[Pose] = Field(max_length=2)
     monitored_track_id: Identifier
     tracking_ambiguous: bool = False
-    source: Literal['live', 'replay'] = 'live'
+    source: Literal['live', 'replay', 'upload'] = 'live'
     demo_time_scale: float = Field(default=1, ge=1, le=8)
     region: 'BedZone | None' = None
 
@@ -39,6 +39,35 @@ class PoseFrame(StrictModel):
         if len({p.track_id for p in self.poses}) != len(self.poses):
             raise ValueError('Pose track ids must be distinct')
         return self
+
+
+class RulesRequest(StrictModel):
+    schema_version: Literal[1] = 1
+    correlation_id: str = Field(min_length=1, max_length=200)
+    profile_version: int = Field(ge=1)
+    frame: PoseFrame
+    profile: 'Profile'
+    state: dict
+
+
+class RulesResponse(StrictModel):
+    schema_version: Literal[1] = 1
+    correlation_id: str = Field(min_length=1, max_length=200)
+    state: dict
+    result: dict | None
+    reason: str
+
+
+class MLRequest(StrictModel):
+    schema_version: Literal[1] = 1
+    correlation_id: str = Field(min_length=1, max_length=200)
+    candidate_id: str = Field(min_length=1, max_length=36)
+    idempotency_key: str = Field(min_length=1, max_length=64)
+    profile_version: int = Field(ge=1)
+    observed_at: float
+    rule_hits: list[str] = Field(max_length=8)
+    quality: Literal['good']
+    samples: list[dict] = Field(min_length=8, max_length=90)
 
 
 class Contact(StrictModel):
@@ -68,7 +97,7 @@ class Profile(StrictModel):
     id: Identifier
     version: int = Field(default=1, ge=1)
     alias: str = Field(min_length=1, max_length=60)
-    age: int = Field(default=71, ge=18, le=120)
+    age: int = Field(default=71, ge=0, le=120)
     mode: Literal['care', 'personal']
     timezone: str = 'America/Toronto'
     conditions: list[str] = Field(default_factory=list, max_length=20)
@@ -87,7 +116,7 @@ class Profile(StrictModel):
     care_notes: str = Field(default='', max_length=1000)
     risk_categories: list[Literal['balance_support', 'mobility_support', 'transfer_assistance', 'medication_fall_risk']] = Field(default_factory=list, max_length=4)
     gemini_consent: bool = False
-    data_category: Literal['synthetic', 'consenting_teammate'] = 'synthetic'
+    data_category: Literal['synthetic', 'consenting_teammate', 'real'] = 'synthetic'
 
     @field_validator('timezone')
     @classmethod

@@ -7,7 +7,8 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 // MediaPipe's WASM loader uses importScripts, which requires a classic worker.
 // Prebundle to IIFE so the same worker works in Vite dev and the production build.
 await build({
-  entryPoints: [path.join(root, "src/pose.worker.ts")],
+  absWorkingDir: root,
+  entryPoints: ["./src/pose.worker.ts"],
   bundle: true,
   format: "iife",
   platform: "browser",
