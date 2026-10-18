@@ -22,7 +22,7 @@ import {
 import { Skeleton } from "./Skeleton";
 import { TriageProgress } from "./TriageProgress";
 import { PoseStabilizer } from "./poseFilter";
-import { pretty, urgencyNames } from "./EventDetail";
+import { urgencyNames } from "./EventDetail";
 
 // Uploaded clips are analysed at a fixed rate of video time, whatever the machine's
 // speed, so every computer scores the same frames and none are skipped.
@@ -44,7 +44,7 @@ const REVIEW_LABELS: Record<string, string> = {
   model_supported_no_gemini: "ML confirmed",
   model_fallback: "Safety rule",
   rules_only: "Rule alert",
-  not_reviewed: "Not sent to Gemini (one review per video)",
+  not_reviewed: "Not sent: a more urgent alert was reviewed",
 };
 const clipTime = (seconds: number) => {
   const s = Math.max(0, seconds);
@@ -555,27 +555,6 @@ export function Capture({
       </li>)}
     </ol>
   </section>;
-  // Gemini reviews one alert per upload (the most urgent); show what it concluded.
-  const reviewed = alertLog.find((event) => event.verdict_status === "validated" && event.verdict);
-  const reviewing = alertLog.find((event) => event.verdict_status === "pending");
-  const notified = (event: GuardianEvent) => event.notifications.length
-    ? `Notified: ${event.notifications.map((n) => `${n.recipient} (${n.channel}, ${pretty(n.state)})`).join(", ")}`
-    : "No notification contacts on this profile.";
-  const geminiCard = reviewed?.verdict ? <section className={`gemini-verdict urgency-${reviewed.urgency}`} aria-live="polite">
-    <div className="gemini-verdict-head">
-      <span className="eyebrow">GEMINI VERDICT · {alertTime(reviewed)}</span>
-      <span className={`pill urgency-${reviewed.urgency}`}>{urgencyNames[reviewed.urgency]}</span>
-    </div>
-    <strong>{pretty(reviewed.verdict.verdict)} · {Math.round(reviewed.verdict.confidence * 100)}% confidence</strong>
-    <p>{reviewed.verdict.summary}</p>
-    {reviewed.verdict.recommended_actions.length > 0 && <ul>
-      {reviewed.verdict.recommended_actions.map((action) => <li key={action}>{action}</li>)}
-    </ul>}
-    <p className="gemini-verdict-note">{notified(reviewed)}</p>
-  </section> : reviewing ? <section className="gemini-verdict pending" aria-live="polite">
-    <span className="eyebrow">GEMINI</span>
-    <p>Reviewing the {(CONCERN_NAMES[reviewing.rule_hits[0]] ?? "alert").toLowerCase()} at {alertTime(reviewing)}…</p>
-  </section> : null;
   const bounds = preview && pose ? personBounds(pose) : null;
   return (
     <section className="panel capture-panel" ref={panel}>
@@ -653,26 +632,28 @@ export function Capture({
         {verdictBusy || verdict
           ? <section className={`capture-verdict status-${shown.kind}`} aria-live="polite">
             <div className="capture-verdict-heading"><SignalIcon kind={shown.kind} size={24} />
-              <div><span className="eyebrow">VIDEO ANALYSIS</span><h3>{shown.title}</h3><span className="muted">{shown.detail}</span></div>
+              <div><span className="eyebrow">VIDEO ANALYSIS</span><h3>{shown.title}</h3></div>
             </div>
+            {triage}
+            {alertLogSection}
           </section>
           : preview
-            ? <div className={`camera-analysis-status status-${shown.kind}`} role="status" aria-live="polite">
-              <SignalIcon kind={shown.kind} />
-              <div><strong>{shown.title}</strong><span>{shown.detail}</span></div>
-            </div>
-            : <p className="capture-analysis-empty">Start the camera or upload a video. The live analysis, alerts and Gemini verdict appear here.</p>}
-        {geminiCard}
-        {alertLogSection}
+            ? <>
+              <div className={`camera-analysis-status status-${shown.kind}`} role="status" aria-live="polite">
+                <SignalIcon kind={shown.kind} />
+                <div><strong>{shown.title}</strong><span>{shown.detail}</span></div>
+              </div>
+              {triage}
+              {alertLogSection}
+            </>
+            : <p className="capture-analysis-empty">Start the camera or upload a video. The live analysis and alerts appear here.</p>}
       </div>
       </div>
-      {(preview || verdict) && triage}
       {toast?.verdict && <aside className={`verdict-toast urgency-${toast.urgency}`} role="alert">
         <div>
-          <span className="eyebrow">HAYVN ALERT · {urgencyNames[toast.urgency]}</span>
-          <strong>{CONCERN_NAMES[toast.rule_hits[0]] ?? "Alert"} · {toast.alias}</strong>
-          <p>{toast.verdict.summary}</p>
-          <span className="muted">{notified(toast)}</span>
+          <span className="eyebrow">HAYVN ALERT · GEMINI REVIEWED</span>
+          <strong className="verdict-toast-level">{urgencyNames[toast.urgency]}</strong>
+          <span>{CONCERN_NAMES[toast.rule_hits[0]] ?? "Alert"} · {toast.alias} · {alertTime(toast)}</span>
         </div>
         <button className="icon-button" aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={16} /></button>
       </aside>}

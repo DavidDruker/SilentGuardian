@@ -252,6 +252,9 @@ class GeminiWorker:
             if not ev:
                 return
             if result:
+                # A fall Gemini confirms is Urgent. Gemini can only ever raise urgency.
+                if result.verdict == 'fall':
+                    result.urgency = 3
                 result.urgency = max(result.urgency, ev.floor_urgency, ev.urgency)
                 ev.verdict, ev.verdict_status = result.model_dump(), 'validated'
                 old = ev.urgency
