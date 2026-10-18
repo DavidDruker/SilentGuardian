@@ -6,6 +6,7 @@ import {
   FileVideo,
   Pause,
   TriangleAlert,
+  X,
 } from "lucide-react";
 import {
   api,
@@ -21,7 +22,7 @@ import {
 import { Skeleton } from "./Skeleton";
 import { TriageProgress } from "./TriageProgress";
 import { PoseStabilizer } from "./poseFilter";
-import { urgencyNames } from "./EventDetail";
+import { pretty, urgencyNames } from "./EventDetail";
 
 // Uploaded clips are analysed at a fixed rate of video time, whatever the machine's
 // speed, so every computer scores the same frames and none are skipped.
@@ -123,6 +124,10 @@ export function Capture({
   const [alertLog, setAlertLog] = useState<GuardianEvent[]>([]);
   const [lastDecision, setLastDecision] = useState<string | null>(null);
   const [mlState, setMlState] = useState(config.ml_state ?? "");
+  // In-app notification shown when Gemini's verdict arrives.
+  const [toast, setToast] = useState<GuardianEvent | null>(null);
+  const toasted = useRef(new Set<string>());
+  const panel = useRef<HTMLElement>(null);
   const video = useRef<HTMLVideoElement>(null),
     worker = useRef<Worker | null>(null),
     media = useRef<MediaStream | null>(null);
@@ -183,6 +188,8 @@ export function Capture({
     setVerdictBusy(false);
     setConcern(null);
     setAlertLog([]);
+    setToast(null);
+    toasted.current.clear();
     setLastDecision(null);
     seenEventIds.current.clear();
     setVideoAspect(0);
@@ -211,6 +218,15 @@ export function Capture({
       // The pending refresh below retries entries still under review.
     }
   };
+  useEffect(() => {
+    const fresh = alertLog.find((event) => event.verdict_status === "validated" && event.verdict
+      && !toasted.current.has(event.id));
+    if (!fresh) return;
+    toasted.current.add(fresh.id);
+    setToast(fresh);
+    const timer = setTimeout(() => setToast(null), 12000);
+    return () => clearTimeout(timer);
+  }, [alertLog]);
   useEffect(() => {
     const pending = alertLog.filter((event) => event.verdict_status === "pending");
     if (!pending.length) return;
@@ -326,6 +342,8 @@ export function Capture({
         await element.play();
       }
       setPreview(true);
+      // Bring the clip and its analysis fully into view together.
+      panel.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       active.current = true;
       lastVideoTime.current = -1;
       replayTime.current = Date.now() / 1000;
@@ -537,9 +555,30 @@ export function Capture({
       </li>)}
     </ol>
   </section>;
+  // Gemini reviews one alert per upload (the most urgent); show what it concluded.
+  const reviewed = alertLog.find((event) => event.verdict_status === "validated" && event.verdict);
+  const reviewing = alertLog.find((event) => event.verdict_status === "pending");
+  const notified = (event: GuardianEvent) => event.notifications.length
+    ? `Notified: ${event.notifications.map((n) => `${n.recipient} (${n.channel}, ${pretty(n.state)})`).join(", ")}`
+    : "No notification contacts on this profile.";
+  const geminiCard = reviewed?.verdict ? <section className={`gemini-verdict urgency-${reviewed.urgency}`} aria-live="polite">
+    <div className="gemini-verdict-head">
+      <span className="eyebrow">GEMINI VERDICT · {alertTime(reviewed)}</span>
+      <span className={`pill urgency-${reviewed.urgency}`}>{urgencyNames[reviewed.urgency]}</span>
+    </div>
+    <strong>{pretty(reviewed.verdict.verdict)} · {Math.round(reviewed.verdict.confidence * 100)}% confidence</strong>
+    <p>{reviewed.verdict.summary}</p>
+    {reviewed.verdict.recommended_actions.length > 0 && <ul>
+      {reviewed.verdict.recommended_actions.map((action) => <li key={action}>{action}</li>)}
+    </ul>}
+    <p className="gemini-verdict-note">{notified(reviewed)}</p>
+  </section> : reviewing ? <section className="gemini-verdict pending" aria-live="polite">
+    <span className="eyebrow">GEMINI</span>
+    <p>Reviewing the {(CONCERN_NAMES[reviewing.rule_hits[0]] ?? "alert").toLowerCase()} at {alertTime(reviewing)}…</p>
+  </section> : null;
   const bounds = preview && pose ? personBounds(pose) : null;
   return (
-    <section className="panel capture-panel">
+    <section className="panel capture-panel" ref={panel}>
       <div className="panel-heading">
         <div>
           <span className="eyebrow">{profile.alias}</span>
@@ -549,10 +588,13 @@ export function Capture({
           {running ? "Monitoring" : verdictBusy ? "Reviewing" : verdict ? "Complete" : "Paused"}
         </span>
       </div>
+      <div className="capture-layout">
+      <div className="capture-media">
       <div className="camera-stage" style={videoAspect ? {
         aspectRatio: String(videoAspect),
-        // Keep the clip compact (360 px tall at most) so the status and log stay in view.
-        width: `min(100%, ${Math.round(360 * videoAspect)}px)`,
+        // Keep the clip compact (360 px tall at most) so the analysis fits beside it.
+        width: `${Math.round(360 * videoAspect)}px`,
+        maxWidth: "100%",
       } : undefined}>
         <video
           ref={video}
@@ -581,10 +623,6 @@ export function Capture({
           </span>
         </div>
       </div>
-      {preview && <div className={`camera-analysis-status status-${shown.kind}`} role="status" aria-live="polite">
-        <SignalIcon kind={shown.kind} />
-        <div><strong>{shown.title}</strong><span>{shown.detail}</span></div>
-      </div>}
       <div className="capture-actions">
         <button
           className="primary"
@@ -610,15 +648,34 @@ export function Capture({
         {verdict && recordedFrames.current.length > 0 && <button className="secondary small" onClick={exportSkeleton}>Download movement data</button>}
       </div>
       {fileName && <p className="capture-file">{fileName} · Video stays in this browser while movement is analyzed.</p>}
-      {(verdictBusy || verdict) && <section className={`capture-verdict status-${shown.kind}`} aria-live="polite">
-        <div className="capture-verdict-heading"><SignalIcon kind={shown.kind} size={24} />
-          <div><span className="eyebrow">VIDEO ANALYSIS</span><h3>{shown.title}</h3></div>
-        </div>
-        {triage}
+      </div>
+      <div className="capture-analysis">
+        {verdictBusy || verdict
+          ? <section className={`capture-verdict status-${shown.kind}`} aria-live="polite">
+            <div className="capture-verdict-heading"><SignalIcon kind={shown.kind} size={24} />
+              <div><span className="eyebrow">VIDEO ANALYSIS</span><h3>{shown.title}</h3><span className="muted">{shown.detail}</span></div>
+            </div>
+          </section>
+          : preview
+            ? <div className={`camera-analysis-status status-${shown.kind}`} role="status" aria-live="polite">
+              <SignalIcon kind={shown.kind} />
+              <div><strong>{shown.title}</strong><span>{shown.detail}</span></div>
+            </div>
+            : <p className="capture-analysis-empty">Start the camera or upload a video. The live analysis, alerts and Gemini verdict appear here.</p>}
+        {geminiCard}
         {alertLogSection}
-      </section>}
-      {preview && !verdictBusy && !verdict && triage}
-      {preview && !verdictBusy && !verdict && alertLogSection}
+      </div>
+      </div>
+      {(preview || verdict) && triage}
+      {toast?.verdict && <aside className={`verdict-toast urgency-${toast.urgency}`} role="alert">
+        <div>
+          <span className="eyebrow">HAYVN ALERT · {urgencyNames[toast.urgency]}</span>
+          <strong>{CONCERN_NAMES[toast.rule_hits[0]] ?? "Alert"} · {toast.alias}</strong>
+          <p>{toast.verdict.summary}</p>
+          <span className="muted">{notified(toast)}</span>
+        </div>
+        <button className="icon-button" aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={16} /></button>
+      </aside>}
       {pendingCapture !== undefined && (
         <div className="modal-shade">
           <section

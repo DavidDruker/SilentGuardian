@@ -282,3 +282,26 @@
   max-height: 360px;
 }
 .alert-log-error { grid-column: 2 / -1; color: var(--slate); font-size: 12px; }
+
+/* Capture: the clip and its live analysis side by side; triage stages underneath. */
+.capture-layout { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.capture-media { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.capture-layout .camera-stage { margin-inline: 0; }
+.capture-layout .camera-stage:not([style]) { width: 480px; max-width: 100%; }
+.capture-analysis { flex: 1 1 300px; min-width: 0; display: grid; gap: 12px; align-content: start; }
+.capture-analysis .camera-analysis-status,
+.capture-analysis .capture-verdict { margin-top: 0; }
+.capture-analysis .capture-verdict .muted { display: block; margin-top: 2px; font-size: 13px; }
+.capture-analysis .alert-log { margin-top: 0; padding-top: 0; border-top: 0; }
+.capture-analysis-empty { margin: 0; color: var(--slate); }
+.gemini-verdict { display: grid; gap: 6px; padding: 12px 14px; background: var(--white);
+  border: 1px solid var(--line); border-left: 4px solid var(--level, var(--slate)); }
+.gemini-verdict-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.gemini-verdict p, .gemini-verdict ul { margin: 0; }
+.gemini-verdict ul { padding-left: 18px; }
+.gemini-verdict-note { color: var(--slate); font-size: 13px; }
+.verdict-toast { position: fixed; top: 16px; right: 16px; z-index: 60; display: flex; gap: 10px; align-items: flex-start;
+  max-width: min(380px, calc(100vw - 32px)); padding: 12px 14px; background: var(--white);
+  border: 1px solid var(--line); border-left: 4px solid var(--level, var(--navy)); box-shadow: 0 8px 24px rgb(15 29 49 / 18%); }
+.verdict-toast > div { display: grid; gap: 4px; }
+.verdict-toast p { margin: 0; }
