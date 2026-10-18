@@ -48,6 +48,7 @@ export function EventDetail({
           <button className="icon-button" aria-label="Close alert" onClick={onClose}><X /></button>
         </header>
         <p className="event-summary">{event.summary}</p>
+        {event.source === "sample" && <p className="muted">Simulated example for this profile. No notification was sent.</p>}
         {metrics.length > 0 && <dl className="metrics-list">
           {metrics.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
         </dl>}
@@ -62,7 +63,7 @@ export function EventDetail({
           <button className="primary" disabled={busy} onClick={() => void update(`/events/${event.id}/ack`, { author: profile?.alias || "Operator", note: "" })}>Acknowledge</button>
           <button className="secondary" disabled={busy} onClick={() => void update(`/events/${event.id}/feedback`, { label: "false_alarm", note: "" })}>False alarm</button>
         </div>}
-        {event.status !== "open" && <p className="muted">Reviewed</p>}
+        {event.status !== "open" && event.source !== "sample" && <p className="muted">Reviewed</p>}
       </section>
     </div>
   );
