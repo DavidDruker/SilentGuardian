@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 
 POLICY_VERSION = 'rules-ml-gemini-v1'
+STAGGER_SCORE_THRESHOLD = .5
 
 
 @dataclass(frozen=True)
@@ -17,7 +18,7 @@ def decide(rule_hits, floor, model_result, threshold):
                         'model_unavailable_or_uncertain')
     supported = (('fall' in rule_hits and model_result.get('fall_score', 0) >= threshold)
                  or (any(hit in rule_hits for hit in ('stumble', 'sway'))
-                     and model_result.get('staggering_score', 0) >= threshold))
+                     and model_result.get('staggering_score', 0) >= STAGGER_SCORE_THRESHOLD))
     if supported:
         return Decision('supported', 'model_supports_rule')
     if 'prolonged_stillness' in rule_hits or floor >= 3:

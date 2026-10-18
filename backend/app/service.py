@@ -253,7 +253,13 @@ class Guardian:
                                  policy_version=POLICY_VERSION if self.settings.decision_mode == 'enforce' else 'rules-shadow-v1')]
                     model_result = None
                     policy = None
-                    if self.settings.decision_mode == 'enforce':
+                    if self.settings.decision_mode == 'enforce' and hit == 'restricted_standing':
+                        candidate.decision, candidate.reason = 'rules_only', 'restricted_hours_rule'
+                        candidate_stages.append(append_stage(s, person_id=p.id, candidate_id=candidate_id,
+                                     event_id=None, stage='candidate_decision', outcome='rules_only',
+                                     source=frame.source, when=now, urgency=floor,
+                                     policy_version=POLICY_VERSION, details={'reason': candidate.reason}))
+                    elif self.settings.decision_mode == 'enforce':
                         state.setdefault('last_candidate_at_by_rule', {})[hit] = frame.timestamp
                         cached['state'] = dict(state)
                         model_result = self.score_candidate(candidate, samples)
@@ -315,7 +321,8 @@ class Guardian:
             prediction = (gate_prediction or {'status': 'not_requested', 'mode': 'enforce'}
                            if self.settings.decision_mode == 'enforce' else
                            self.actions.observe(stream_id, p, samples, result['quality'],
-                                                [ev.id for ev in active_events], hits,
+                                                [ev.id for ev in active_events if 'restricted_standing' not in ev.rule_hits],
+                                                [hit for hit in hits if hit != 'restricted_standing'],
                                                 'synthetic' if frame.camera_id == 'synthetic-demo' else frame.source))
             return IngestResult(accepted=True, reason=reason, quality=result['quality'], features=features,
                                 rule_hits=hits, event_id=active_events[0].id if active_events else None,
@@ -406,7 +413,11 @@ class Guardian:
                 Window.stream_id == stream_id)) or 0
             events = list(s.scalars(select(Event).where(Event.stream_id == stream_id,
                                                        Event.source == 'upload')))
-            events.sort(key=lambda event: (event.urgency, event.opened_at), reverse=True)
+            # Lead with a movement event that reached ML/Gemini when a separate
+            # contextual rule alert also exists in the same upload.
+            events.sort(key=lambda event: (
+                event.verdict_status in ('pending', 'validated', 'fallback', 'model_supported_no_gemini'),
+                event.urgency, event.opened_at), reverse=True)
             candidate_filter = Candidate.event_id == events[0].id if events else Candidate.stream_id == stream_id
             candidate = s.scalar(select(Candidate).where(candidate_filter).order_by(Candidate.observed_at.desc()).limit(1))
             return {'session_id': session_id, 'scored_windows': windows,

@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from backend.app.action_model import ActionModel, COCO_FROM_MEDIAPIPE, prepare_sequence
-from backend.app.db import Event, Window
+from backend.app.db import Candidate, Event, Window
 from backend.app.detector import sample
 from backend.app.gemini import event_package
 from backend.app.replay import scenario_frames
@@ -85,14 +85,43 @@ def test_event_comparison_never_changes_urgency_or_gemini_input(guardian):
     assert guardian.event(event.id).status == 'acknowledged'
 
 
-def test_shadow_result_is_attached_to_each_open_rule_alert(guardian):
+@pytest.mark.parametrize('configured', [True, False])
+def test_supporting_shadow_score_sends_rule_alert_to_gemini(guardian, configured):
+    guardian.settings.gemini_api_key = 'test-key' if configured else ''
+    guardian.settings.gemini_billed_project_confirmed = configured
+    ready(guardian)
+    for f in scenario_frames('fall', 'daniel', guardian.clock(), duration=4):
+        guardian.ingest(f)
+        guardian.actions.tick()
+    event = guardian.events()[0]
+    # The alert stays open with its original urgency; only the review path changes.
+    assert event.status == 'open' and event.urgency == 2
+    assert event.verdict_status == ('pending' if configured else 'model_supported_no_gemini')
+    with guardian.db.sessions() as s:
+        candidate = s.get(Candidate, s.get(Event, event.id).features['candidate_id'])
+    assert candidate.decision == 'supported' and candidate.model_result['status'] == 'scored'
+
+
+def test_unsupportive_shadow_score_leaves_rule_alert_alone(guardian):
+    guardian.settings.gemini_api_key, guardian.settings.gemini_billed_project_confirmed = 'test-key', True
+    ready(guardian)
+    low = FakeModel.predict
+    guardian.actions.model.predict = lambda poses: {**low(None, poses), 'fall_score': .01}
+    for f in scenario_frames('fall', 'daniel', guardian.clock(), duration=4):
+        guardian.ingest(f)
+        guardian.actions.tick()
+    assert guardian.events()[0].verdict_status == 'rules_only'
+
+
+def test_shadow_result_skips_restricted_standing_alert(guardian):
     ready(guardian)
     for frame in scenario_frames('fall', 'margaret', guardian.clock(), duration=4):
         guardian.ingest(frame)
         guardian.actions.tick()
     events = {event.rule_hits[0]: event for event in guardian.events()}
     assert set(events) == {'restricted_standing', 'fall'}
-    assert all(event.action_prediction['fall_score'] == .99 for event in events.values())
+    assert events['fall'].action_prediction['fall_score'] == .99
+    assert events['restricted_standing'].action_prediction is None
 
 
 def test_late_result_is_discarded_after_consent_revocation(guardian):

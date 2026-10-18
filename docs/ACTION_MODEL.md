@@ -3,8 +3,9 @@
 Silent Guardian runs the official **ST-GCN++ NTU60 2D joint checkpoint** on the
 backend CPU. Capture and event detail show predictions beside the existing
 detector. This is **shadow evaluation**: the model cannot create, suppress,
-escalate, or deliver alerts. Scores are excluded from Gemini's input too, so
-they cannot indirectly change notification decisions.
+escalate, or deliver alerts. When a score supports an open alert's rule, that
+alert is sent to Gemini review with the supporting scores as evidence; Gemini
+may raise urgency but never below the rule's floor.
 
 ## Run
 

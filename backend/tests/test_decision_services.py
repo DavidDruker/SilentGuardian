@@ -61,6 +61,37 @@ def test_policy_uses_uncertainty_for_unrelated_action_class():
     assert decide(['bed_exit'], 2, {'status': 'scored', 'fall_score': 0, 'staggering_score': 0}, .5).action == 'hold'
     assert decide(['prolonged_stillness'], 2, None, .5).action == 'fallback_open'
     assert decide(['fall'], 3, {'status': 'scored', 'fall_score': .9}, .5).action == 'supported'
+    assert decide(['fall'], 2, {'status': 'scored', 'fall_score': .42}, .4).action == 'supported'
+    assert decide(['fall'], 2, {'status': 'scored', 'fall_score': .39}, .4).action == 'rejected'
+    assert decide(['stumble'], 1, {'status': 'scored', 'staggering_score': .42}, .4).action == 'rejected'
+
+
+def test_restricted_standing_uses_rules_while_fall_uses_ml(guardian):
+    guardian.settings.decision_mode = 'enforce'
+    model_calls = []
+    def score(candidate, samples):
+        model_calls.append(candidate.rule_hits)
+        return {'status': 'scored', 'model': 'test', 'fall_score': .9,
+                'staggering_score': 0, 'latency_ms': 1}
+    guardian.score_candidate = score
+    frames = [frame.model_copy(update={'source': 'upload', 'camera_id': 'browser-camera'})
+              for frame in scenario_frames('fall', 'margaret')]
+    for frame in frames:
+        guardian.ingest(frame)
+    events = {event.rule_hits[0]: event for event in guardian.events()}
+    assert set(events) == {'restricted_standing', 'fall'}
+    assert events['restricted_standing'].verdict_status == 'rules_only'
+    assert events['fall'].verdict_status == 'model_supported_no_gemini'
+    assert model_calls and all(hits == ['fall'] for hits in model_calls)
+    capture = guardian.capture_result('margaret', frames[0].session_id)
+    assert capture['event']['rule_hits'] == ['fall']
+    assert capture['candidate_decision'] == 'supported'
+    assert {event['rule_hits'][0] for event in capture['events']} == {'fall', 'restricted_standing'}
+    with guardian.db.sessions() as session:
+        standing = session.scalar(select(Candidate).where(Candidate.event_id == events['restricted_standing'].id))
+        assert standing.decision == 'rules_only' and standing.model_result is None
+        assert not list(session.scalars(select(EventStage).where(
+            EventStage.event_id == events['restricted_standing'].id, EventStage.stage == 'ml_result')))
 
 
 def test_gemini_receives_context_only_after_ml_support(guardian):
@@ -89,6 +120,40 @@ def test_gemini_receives_context_only_after_ml_support(guardian):
     assert captured['model_evidence']['decision'] == 'supported'
     assert captured['profile']['conditions'] == profile.conditions
     assert guardian.events()[0].verdict_status == 'validated'
+
+
+def test_gemini_reviews_fall_with_separate_restricted_standing_concern(guardian):
+    guardian.settings.decision_mode = 'enforce'
+    guardian.settings.gemini_api_key = 'test'
+    guardian.settings.gemini_billed_project_confirmed = True
+    profile = next(p for p in guardian.profiles() if p.id == 'margaret')
+    guardian.save_profile(profile.model_copy(update={'gemini_consent': True}))
+    guardian.score_candidate = lambda candidate, samples: {
+        'status': 'scored', 'model': 'test', 'fall_score': .9,
+        'staggering_score': 0, 'latency_ms': 1,
+    }
+    frames = [frame.model_copy(update={'source': 'upload', 'camera_id': 'browser-camera'})
+              for frame in scenario_frames('fall', 'margaret')]
+    for frame in frames:
+        guardian.ingest(frame)
+    pending = guardian.capture_result('margaret', frames[0].session_id)
+    assert pending['status'] == 'reviewing'
+    assert pending['event']['rule_hits'] == ['fall']
+    assert {event['rule_hits'][0] for event in pending['events']} == {'fall', 'restricted_standing'}
+    captured = {}
+    async def review(package, evidence):
+        captured.update(package)
+        return json.dumps({'verdict': 'fall', 'urgency': 2, 'confidence': .8,
+                           'summary': 'Possible fall. Check on the person.',
+                           'evidence': [{'ref': 'ml.supported', 'detail': 'Model supported the fall rule'}],
+                           'recommended_actions': ['Check on the person']})
+    worker = GeminiWorker(guardian)
+    worker.request = review
+    asyncio.run(worker.tick())
+    completed = guardian.capture_result('margaret', frames[0].session_id)
+    assert completed['event']['verdict_status'] == 'validated'
+    assert {event['rule_hits'][0] for event in completed['events']} == {'fall', 'restricted_standing'}
+    assert any('restricted_standing' in event['rules'] for event in captured['recent_events'])
 
 
 def test_legacy_rules_only_pending_event_cannot_reach_gemini(guardian):

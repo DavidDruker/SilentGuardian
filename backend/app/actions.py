@@ -13,7 +13,8 @@ import time
 from uuid import uuid4
 
 from .action_model import ActionModel, MODEL_ID, PREPROCESSING, prepare_sequence
-from .db import Event, Person, Window
+from .db import Candidate, Event, Person, Window
+from .decision import POLICY_VERSION, decide
 from .stages import append_stage
 from .schemas import MLRequest
 
@@ -127,6 +128,24 @@ class ActionWorker:
                 return {**result, 'age_seconds': round(observed-result['observed_at'], 3)}
             return dict(status='pending', mode='shadow', model=MODEL_ID)
 
+    def promote(self, session, event, person, result):
+        """Send a rule alert to Gemini once a shadow ML score supports its rule."""
+        if event.verdict_status != 'rules_only' or event.status != 'open':
+            return
+        candidate = session.get(Candidate, event.features.get('candidate_id'))
+        policy = decide(event.rule_hits, event.floor_urgency, result, self.g.settings.fall_score_threshold)
+        if not candidate or candidate.event_id != event.id or policy.action != 'supported':
+            return
+        cfg = self.g.settings
+        review = bool(cfg.gemini_api_key and cfg.gemini_billed_project_confirmed
+                      and person.body.get('gemini_consent') and event.profile.get('gemini_consent'))
+        candidate.decision, candidate.reason, candidate.model_result = 'supported', policy.reason, result
+        event.verdict_status = 'pending' if review else 'model_supported_no_gemini'
+        append_stage(session, person_id=event.person_id, candidate_id=candidate.id, event_id=event.id,
+                     stage='candidate_decision', outcome='supported', source=event.source,
+                     when=self.g.clock(), urgency=event.urgency, policy_version=POLICY_VERSION,
+                     details={'reason': policy.reason, 'mode': 'shadow', 'gemini': review})
+
     def tick(self):
         with self.lock:
             if not self.pending or (self.model is None and not self.g.settings.ml_service_url) or self.closed:
@@ -168,7 +187,8 @@ class ActionWorker:
             window = session.get(Window, (ts, job['stream_id']))
             if window is None:
                 return True
-            # Update only evidence. The model cannot create/escalate/suppress an event.
+            # The model cannot create, escalate, or suppress an event. A score that
+            # supports the event's rule does send it on to Gemini review.
             encoded = json.dumps(result)
             window.features = {**window.features, 'action_prediction_json': encoded}
             for event_id in job['event_ids']:
@@ -183,6 +203,7 @@ class ActionWorker:
                                      when=self.g.clock(), urgency=event.urgency,
                                      details={'model': result['model'], 'latency_ms': result['latency_ms'],
                                               'fall_score': round(result['fall_score'], 4)})
+                    self.promote(session, event, person, result)
             if record['result'] is None or record['result']['observed_at'] <= result['observed_at']:
                 record['result'] = result
             self.completed += 1

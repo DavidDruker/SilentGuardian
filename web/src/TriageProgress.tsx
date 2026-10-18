@@ -11,6 +11,7 @@ export function TriageProgress({
   hasIncident = false,
   quality,
   scoredWindows = 0,
+  geminiBlocker,
 }: {
   event?: GuardianEvent | null;
   candidateDecision?: string | null;
@@ -19,6 +20,7 @@ export function TriageProgress({
   hasIncident?: boolean;
   quality?: string;
   scoredWindows?: number;
+  geminiBlocker?: string;
 }) {
   const action = prediction ?? event?.action_prediction;
   const hasRuleHit = Boolean(event || candidateDecision || ruleHits.length || hasIncident);
@@ -30,7 +32,9 @@ export function TriageProgress({
 
   let ml: Stage = { label: "ML", detail: "Not used", state: "skipped" };
   if (hasRuleHit) {
-    if (candidateDecision === "supported" || event?.verdict_status === "model_supported_no_gemini") {
+    // Gemini only ever receives ML-supported incidents, so any Gemini state implies support.
+    if (candidateDecision === "supported" || ["model_supported_no_gemini", "pending", "validated", "fallback", "privacy_blocked"]
+      .includes(event?.verdict_status ?? "")) {
       ml = { label: "ML", detail: "Supported", state: "done" };
     } else if (candidateDecision === "rejected") {
       ml = { label: "ML", detail: "Not supported", state: "done" };
@@ -56,6 +60,8 @@ export function TriageProgress({
     gemini = { label: "Gemini", detail: "Review unavailable", state: "done" };
   } else if (event?.verdict_status === "privacy_blocked") {
     gemini = { label: "Gemini", detail: "Consent blocked", state: "skipped" };
+  } else if (event?.verdict_status === "model_supported_no_gemini") {
+    gemini = { label: "Gemini", detail: geminiBlocker ?? "Not requested", state: "skipped" };
   }
 
   const stages = [rule, ml, gemini];

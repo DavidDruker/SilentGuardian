@@ -20,6 +20,20 @@ import {
 } from "./api";
 import { Skeleton } from "./Skeleton";
 import { TriageProgress } from "./TriageProgress";
+import { PoseStabilizer } from "./poseFilter";
+
+// Show a new status only after it has held for a moment, so per-frame wobble
+// between two readings does not make the status card flicker.
+function useSteady(key: string, holdMs: number, immediate: boolean) {
+  const [shown, setShown] = useState(key);
+  useEffect(() => {
+    if (key === shown) return;
+    if (immediate) { setShown(key); return; }
+    const timer = setTimeout(() => setShown(key), holdMs);
+    return () => clearTimeout(timer);
+  }, [key, shown, holdMs, immediate]);
+  return immediate ? key : shown;
+}
 function personBounds(landmarks: Landmark[]) {
   const visible = landmarks.filter((point) =>
     point.visibility >= 0.35 && Number.isFinite(point.x) && Number.isFinite(point.y) &&
@@ -61,7 +75,8 @@ export function Capture({
   onEvent: () => void;
   onError: (s: string) => void;
 }) {
-  const [poses, setPoses] = useState<Landmark[][]>([]),
+  const [pose, setPose] = useState<Landmark[] | null>(null),
+    [people, setPeople] = useState(0),
     [running, setRunning] = useState(false),
     [preview, setPreview] = useState(false);
   const [status, setStatus] = useState("Camera is paused"),
@@ -81,7 +96,9 @@ export function Capture({
   const [pendingCapture, setPendingCapture] = useState<File | null | undefined>(
     undefined,
   );
-  const [sendGemini, setSendGemini] = useState(false),
+  // Start from the profile's saved choice: saving consent with an unticked box
+  // would otherwise revoke Gemini review on every new capture.
+  const [sendGemini, setSendGemini] = useState(Boolean(profile.gemini_consent)),
     [consentBusy, setConsentBusy] = useState(false);
   const active = useRef(false),
     busy = useRef(false),
@@ -91,6 +108,10 @@ export function Capture({
   const seenEventIds = useRef(new Set<string>());
   const session = useRef(uid());
   const recordedFrames = useRef<PoseFrame[]>([]);
+  const stabilizer = useRef(new PoseStabilizer()),
+    captureTime = useRef(0),
+    lastScored = useRef<IngestResult["action_prediction"]>(null),
+    signals = useRef(new Map<string, { kind: SignalKind; title: string; detail: string }>());
   const selectedRef = useRef(false),
     finishing = useRef(false),
     runId = useRef(0);
@@ -120,7 +141,10 @@ export function Capture({
     busy.current = false;
     setRunning(false);
     setPreview(false);
-    setPoses([]);
+    setPose(null);
+    setPeople(0);
+    stabilizer.current.reset();
+    lastScored.current = null;
     setResult(null);
     setSource("");
     setFileName("");
@@ -140,9 +164,9 @@ export function Capture({
   useEffect(() => () => stop(), []);
   useEffect(() => {
     stop();
-    setPoses([]);
     setResult(null);
     setSource("");
+    setSendGemini(Boolean(profile.gemini_consent));
   }, [profile.id]);
   useEffect(() => {
     if (!profile.consent) stop();
@@ -170,6 +194,7 @@ export function Capture({
     sock.current?.close();
     sock.current = connectPose((r) => {
       if (r.quality !== "buffering") setResult(r);
+      if (r.action_prediction?.status === "scored") lastScored.current = r.action_prediction;
       const ids = r.event_ids?.length ? r.event_ids : r.event_id ? [r.event_id] : [];
       if (ids.length) {
         setActiveAlert(true);
@@ -292,24 +317,27 @@ export function Capture({
             visibility: l.visibility ?? 0,
           })),
         );
-        setPoses(detected);
-        if (detected.length === 1 && !selectedRef.current) choose();
-        lost.current = detected.length !== 1;
-        if (detected.length > 1) setStatus("More than one person in view");
-        else if (detected.length === 0) setStatus("Person not visible");
+        // Smooth jitter and bridge split-second dropouts before anything is shown or sent.
+        const timestamp = captureTime.current;
+        const stable = stabilizer.current.update(detected, timestamp);
+        setPose(stable.pose);
+        setPeople(stable.people);
+        if (stable.people === 1 && !selectedRef.current) choose();
+        lost.current = stable.people !== 1;
+        if (stable.people > 1) setStatus("More than one person in view");
+        else if (stable.people === 0) setStatus("Person not visible");
         else setStatus("Tracking one person");
-        if (!sock.current) return;
+        // A held pose is display-only: the backend tolerates the brief gap itself,
+        // so it never scores a repeated, stale frame.
+        if (!sock.current || stable.held) return;
         const frame: PoseFrame = {
           session_id: session.current,
           camera_id: "browser-camera",
           person_id: profile.id,
-          timestamp:
-            sourceRef.current === "live"
-              ? Date.now() / 1000
-              : replayTime.current + element.currentTime,
-          poses: detected.length === 1 ? [{ track_id: "subject", landmarks: detected[0] }] : [],
+          timestamp,
+          poses: stable.pose ? [{ track_id: "subject", landmarks: stable.pose }] : [],
           monitored_track_id: "subject",
-          tracking_ambiguous: detected.length !== 1,
+          tracking_ambiguous: stable.people !== 1,
           source: sourceRef.current as "live" | "upload",
           demo_time_scale: 1,
         };
@@ -330,6 +358,11 @@ export function Capture({
         ) {
           busy.current = true;
           lastVideoTime.current = element.currentTime;
+          // Stamp the frame when it is captured, not when inference returns,
+          // so joint speeds are measured on the real frame spacing.
+          captureTime.current = sourceRef.current === "live"
+            ? Date.now() / 1000
+            : replayTime.current + element.currentTime;
           try {
             const bitmap = await createImageBitmap(element);
             worker.current?.postMessage(
@@ -370,7 +403,7 @@ export function Capture({
     kind: "warning", title: "Checking movement", detail: "Keep the person clearly in view.",
   };
   const alertCount = verdict?.events?.length ?? activeEventIds.length;
-  if (preview && poses.length > 1 && !verdict) {
+  if (preview && people > 1 && !verdict) {
     signal = { kind: "warning", title: "One person only", detail: "Clear the room before monitoring continues." };
   } else if (activeAlert || verdict?.events?.length) {
     signal = { kind: "alert", title: alertCount > 1 ? `${alertCount} concerns detected` : "Concern detected", detail: "Review the alerts for details." };
@@ -391,24 +424,43 @@ export function Capture({
   } else if (result?.quality === "good" && result.accepted) {
     signal = { kind: "good", title: "No concern detected", detail: "One person is in view and monitoring is active." };
   }
+  const signalKey = `${signal.kind}|${signal.title}`;
+  signals.current.set(signalKey, signal);
+  const shownKey = useSteady(signalKey, 700, signal.kind === "alert" || verdictBusy || Boolean(verdict) || !preview);
+  const shown = signals.current.get(shownKey) ?? signal;
+  const geminiBlocker = !config.gemini_configured ? "No API key on server"
+    : !config.gemini_billed_project_confirmed ? "Billing not confirmed on server"
+    : !profile.gemini_consent ? "Not allowed for this profile" : undefined;
   const triage = <TriageProgress
     event={verdict?.event ?? activeEvent}
     candidateDecision={verdict?.candidate_decision}
-    prediction={result?.action_prediction}
+    prediction={lastScored.current ?? result?.action_prediction}
+    geminiBlocker={geminiBlocker}
     ruleHits={result?.rule_hits}
     hasIncident={activeAlert}
     quality={result?.quality}
     scoredWindows={verdict?.scored_windows}
   />;
   const analyzedEvent = verdict?.event;
-  const analysisTitle = alertCount > 1 ? `${alertCount} alerts recorded`
+  const concernNames: Record<string, string> = {
+    fall: "Possible fall",
+    restricted_standing: "Standing during restricted hours",
+    stumble: "Stumble",
+    sway: "Sway",
+    bed_exit: "Bed exit",
+    prolonged_stillness: "Prolonged stillness",
+    personal_baseline: "Unusual movement",
+  };
+  const concerns = [...new Set(verdict?.events?.flatMap((event) => event.rule_hits) ?? [])]
+    .map((hit) => concernNames[hit] ?? hit.replaceAll("_", " "));
+  const analysisTitle = alertCount > 1 ? (concerns.length ? concerns.join(" · ") : `${alertCount} alerts recorded`)
     : analyzedEvent?.verdict_status === "validated" ? analyzedEvent.summary
     : analyzedEvent?.verdict_status === "pending" ? "Gemini review in progress"
     : analyzedEvent?.verdict_status === "rules_only" ? "Rule alert recorded"
     : analyzedEvent?.verdict_status === "model_fallback" ? "Rule alert · ML unavailable"
     : analyzedEvent?.verdict_status === "model_supported_no_gemini" ? "ML-supported alert"
-    : signal.title;
-  const bounds = preview && poses.length === 1 ? personBounds(poses[0]) : null;
+    : shown.title;
+  const bounds = preview && pose ? personBounds(pose) : null;
   return (
     <section className="panel capture-panel">
       <div className="panel-heading">
@@ -432,10 +484,10 @@ export function Capture({
           onEnded={() => void finishUpload()}
         />
         {!preview && <div className="room-grid" />}
-        {preview && poses.length === 1 && <Skeleton pose={poses[0]} />}
+        {preview && pose && <Skeleton pose={pose} />}
         {bounds && <div className="person-tracking-box identified"
           style={bounds} aria-hidden="true" />}
-        {!preview && poses.length === 0 && (
+        {!preview && !pose && (
           <div className="camera-empty">
             <div className="camera-icon">
               <Camera size={32} />
@@ -451,9 +503,9 @@ export function Capture({
           </span>
         </div>
       </div>
-      {preview && <div className={`camera-analysis-status status-${signal.kind}`} role="status" aria-live="polite">
-        <SignalIcon kind={signal.kind} />
-        <div><strong>{signal.title}</strong><span>{signal.detail}</span></div>
+      {preview && <div className={`camera-analysis-status status-${shown.kind}`} role="status" aria-live="polite">
+        <SignalIcon kind={shown.kind} />
+        <div><strong>{shown.title}</strong><span>{shown.detail}</span></div>
       </div>}
       <div className="capture-actions">
         <button
@@ -480,8 +532,8 @@ export function Capture({
         {verdict && recordedFrames.current.length > 0 && <button className="secondary small" onClick={exportSkeleton}>Download movement data</button>}
       </div>
       {fileName && <p className="capture-file">{fileName} · Video stays in this browser while movement is analyzed.</p>}
-      {(verdictBusy || verdict) && <section className={`capture-verdict status-${signal.kind}`} aria-live="polite">
-        <div className="capture-verdict-heading"><SignalIcon kind={signal.kind} size={24} />
+      {(verdictBusy || verdict) && <section className={`capture-verdict status-${shown.kind}`} aria-live="polite">
+        <div className="capture-verdict-heading"><SignalIcon kind={shown.kind} size={24} />
           <div><span className="eyebrow">VIDEO ANALYSIS</span><h3>{analysisTitle}</h3></div>
         </div>
         {triage}

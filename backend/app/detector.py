@@ -11,6 +11,9 @@ from .schemas import PoseFrame, Profile
 KEYS = (0, 11, 12, 15, 16, 23, 24, 27, 28)
 MODEL_KEYS = (11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28)
 BRIDGE_SECONDS = 3
+# Must stay below the .75 s window-continuity limit in evaluate().
+BRIEF_DROPOUT_SECONDS = .5
+FALL_HIP_DROP_TORSO_RATIO = .35
 
 
 def midpoint(points, a, b):
@@ -23,7 +26,17 @@ def quiet_hours(profile, timestamp):
     return a <= hour < b if a < b else hour >= a or hour < b
 
 
-def sample(frame: PoseFrame, profile: Profile):
+def classify_posture(angle, height, width, torso, previous=None):
+    # Hysteresis: keep the previous posture until the reading clearly leaves it, so a
+    # body near a threshold does not flicker between postures (and reset timers).
+    if previous == 'lying' and angle > 50 and width > height * .8:
+        return 'lying'
+    if previous == 'standing' and angle < 42 and height / torso > 2.1:
+        return 'standing'
+    return 'lying' if angle > 60 and width > height * .9 else 'standing' if angle < 35 and height / torso > 2.3 else 'sitting'
+
+
+def sample(frame: PoseFrame, profile: Profile, previous_posture=None):
     # This capture pipeline is for one person in the room. A second visible pose
     # makes the frame uncertain instead of selecting one person's landmarks.
     if len(frame.poses) != 1:
@@ -48,7 +61,7 @@ def sample(frame: PoseFrame, profile: Profile):
     angle = math.degrees(math.atan2(abs(hip[0] - shoulder[0]), abs(hip[1] - shoulder[1])))
     height = max(p.y for p in points) - min(p.y for p in points)
     width = max(p.x for p in points) - min(p.x for p in points)
-    posture = 'lying' if angle > 60 and width > height * .9 else 'standing' if angle < 35 and height / torso > 2.3 else 'sitting'
+    posture = classify_posture(angle, height, width, torso, previous_posture)
     zone = profile.bed_zone
     in_bed = bool(zone and zone.x1 <= hip[0] <= zone.x2 and zone.y1 <= hip[1] <= zone.y2)
     helper = False
@@ -75,14 +88,18 @@ def evaluate(frame: PoseFrame, profile: Profile, state: dict):
         return state, None, 'duplicate_or_out_of_order'
     state = dict(state)
     state['last_timestamp'] = t
-    current = sample(frame, profile)
+    current = sample(frame, profile, state.get('posture'))
+    if current is None and state.get('samples') and t - state['samples'][-1]['t'] <= BRIEF_DROPOUT_SECONDS:
+        # A split-second tracking dropout is noise, not a change of state. Keep the
+        # rolling window and timers; the next good frame continues where this left off.
+        return state, None, 'brief_dropout'
     if current is None:
         # A person lying on the floor often hides wrists or ankles for a moment. Keep the
         # stillness timer through at most BRIDGE_SECONDS of low-visibility frames; the
         # next good frame confirms it (same place, still on the floor) or resets it.
         gap_from = state.get('gap_from') or (state['samples'][-1]['t'] if state.get('samples') else t)
         keep = state.get('fall_seen') and state.get('still_since') is not None and t - gap_from <= BRIDGE_SECONDS
-        state.update(samples=[], sway_since=None, recovery_since=None, last_good=None, gap_from=gap_from)
+        state.update(samples=[], sway_since=None, recovery_since=None, last_good=None, gap_from=gap_from, posture=None)
         if not keep:
             state.update(still_since=None, still_anchor=None)
         return state, dict(quality='uncertain', features={}, rule_hits=[], samples=[]), 'low_visibility_or_ambiguous'
@@ -99,7 +116,7 @@ def evaluate(frame: PoseFrame, profile: Profile, state: dict):
         prior = []
         state.update(still_since=None, still_anchor=None, sway_since=None, recovery_since=None, bridged=False)
     samples = [s for s in prior if t - s['t'] <= 2] + [current]
-    state.update(samples=samples, last_good=t)
+    state.update(samples=samples, last_good=t, posture=current['posture'])
     if t - state.get('last_score', 0) < 1 / 3 - .001:
         return state, None, 'buffering'
     state['last_score'] = t
@@ -112,7 +129,7 @@ def evaluate(frame: PoseFrame, profile: Profile, state: dict):
     wrist_speed = max((max(math.dist(a['wrist'][i], b['wrist'][i]) for i in (0, 1)) / scale / dt for a, b, dt in steps), default=0)
     ankle_change = max((abs((b['ankles'][0]-b['ankles'][1])-(a['ankles'][0]-a['ankles'][1])) / scale / dt for a, b, dt in steps), default=0)
     hits = []
-    if drop > .5 and current['posture'] == 'lying' and not current['in_bed']:
+    if drop > FALL_HIP_DROP_TORSO_RATIO and current['posture'] == 'lying' and not current['in_bed']:
         hits.append('fall')
         state['fall_seen'] = True
     on_floor = current['posture'] == 'lying' and not current['in_bed']

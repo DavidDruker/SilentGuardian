@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     internal_service_token: str = 'local-internal-demo-token'
     decision_mode: str = 'shadow'
     gate_validated: bool = False
-    fall_score_threshold: float = .5
+    fall_score_threshold: float = .4
     model_timeout_seconds: float = 2
     personalization_previous_weight: float = .8
     personalization_timezone: str = 'America/Toronto'

@@ -13,6 +13,12 @@ export const edges = [
   [24, 26],
   [26, 28],
 ];
+// Body joints plus the head. Face, finger and toe points are the noisiest
+// MediaPipe outputs and add twitching without adding information.
+const joints = [0, ...new Set(edges.flat())];
+// Fade low-confidence joints instead of letting them blink in and out.
+const opacity = (point?: Landmark) => Math.min(1, Math.max(0, ((point?.visibility ?? 0) - 0.2) / 0.4));
+
 export function Skeleton({ pose }: { pose: Landmark[] }) {
   return (
     <svg
@@ -22,7 +28,7 @@ export function Skeleton({ pose }: { pose: Landmark[] }) {
       role="img"
       aria-label="Skeleton landmarks, with no video transmitted"
     >
-      <g stroke="#8cc1ea" fill="#ffffff">
+      <g stroke="#8cc1ea" fill="#ffffff" strokeLinecap="round">
         {edges.map(
           ([a, b]) =>
             pose[a] &&
@@ -34,16 +40,18 @@ export function Skeleton({ pose }: { pose: Landmark[] }) {
                 x2={pose[b].x * 640}
                 y2={pose[b].y * 480}
                 strokeWidth="3"
+                opacity={Math.min(opacity(pose[a]), opacity(pose[b]))}
               />
             ),
         )}
-        {pose.map((p, j) => (
+        {joints.map((j) => pose[j] && (
           <circle
             key={j}
-            cx={p.x * 640}
-            cy={p.y * 480}
+            cx={pose[j].x * 640}
+            cy={pose[j].y * 480}
             r={j === 0 ? 8 : 3}
             stroke="none"
+            opacity={opacity(pose[j])}
           />
         ))}
       </g>

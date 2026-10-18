@@ -12,7 +12,7 @@ from backend.app.db import Audit, Database, Event, Notification, Window
 from backend.app.detector import evaluate
 from backend.app.gemini import GeminiWorker, validate_verdict
 from backend.app.notifications import Delivery, NotificationWorker, queue_demo_call
-from backend.app.replay import scenario_frames
+from backend.app.replay import scenario_frames, skeleton
 from backend.app.schemas import PoseFrame
 from backend.app.service import Guardian
 
@@ -53,6 +53,25 @@ def test_restricted_standing_and_fall_open_independent_alerts(guardian):
     assert {event['rule_hits'][0] for event in capture['events']} == {'restricted_standing', 'fall'}
     guardian.acknowledge(events['restricted_standing'].id, 'Tester', 'Checked standing')
     assert guardian.event(events['fall'].id).status == 'open'
+
+
+def test_borderline_hip_drop_is_now_a_possible_fall(guardian):
+    results = []
+    start = None
+    for frame in scenario_frames('normal', 'daniel'):
+        if start is None:
+            start = frame.timestamp
+        elapsed = frame.timestamp - start
+        if elapsed >= 2:
+            progress = min(1, (elapsed - 2) / .65)
+            body = frame.model_dump()
+            body['poses'] = [{'track_id': 'subject',
+                              'landmarks': skeleton(y=.55 + .13 * progress, angle=math.pi / 2 * progress)}]
+            frame = PoseFrame.model_validate(body)
+        results.append(guardian.ingest(frame))
+    fall_results = [result for result in results if 'fall' in result.rule_hits]
+    assert fall_results
+    assert any(.35 < result.features['hip_drop'] < .5 for result in fall_results)
 
 
 def test_multiple_people_do_not_enter_single_person_detector(guardian):
@@ -416,3 +435,29 @@ def test_long_lie_survives_brief_occlusion_but_not_long_gaps(guardian):
     assert brief is not None and clear <= brief <= clear+1
     long = first_long_lie(frames, p, gap=(10, 15))
     assert long is None or long >= clear+4
+
+
+def test_brief_dropout_keeps_window_but_long_gap_resets():
+    from backend.app.detector import evaluate
+    from backend.app.seed import demo_profiles
+    profile = demo_profiles()[1]
+    frames = list(scenario_frames('normal', profile.id, 1792217400))[:31]
+    state = {}
+    for frame in frames[:20]:
+        state, _, _ = evaluate(frame, profile, state)
+    kept = len(state['samples'])
+    blank = frames[20].model_copy(update={'poses': []})
+    state, result, reason = evaluate(blank, profile, state)
+    assert (reason, result, len(state['samples'])) == ('brief_dropout', None, kept)
+    late = frames[20].model_copy(update={'poses': [], 'timestamp': frames[19].timestamp + 1})
+    state, result, reason = evaluate(late, profile, state)
+    assert result['quality'] == 'uncertain' and state['samples'] == []
+
+
+def test_posture_holds_until_reading_clearly_changes():
+    from backend.app.detector import classify_posture
+    # 38 degrees is between the standing (35) and hold (42) thresholds.
+    assert classify_posture(38, .6, .2, .2) == 'sitting'
+    assert classify_posture(38, .6, .2, .2, previous='standing') == 'standing'
+    assert classify_posture(45, .6, .2, .2, previous='standing') == 'sitting'
+    assert classify_posture(55, .3, .3, .2, previous='lying') == 'lying'
