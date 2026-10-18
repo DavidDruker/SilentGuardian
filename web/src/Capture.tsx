@@ -434,7 +434,7 @@ export function Capture({
         {!preview && <div className="room-grid" />}
         {preview && poses.length === 1 && <Skeleton pose={poses[0]} />}
         {bounds && <div className="person-tracking-box identified"
-          style={bounds} aria-hidden="true"><span>Monitored person</span></div>}
+          style={bounds} aria-hidden="true" />}
         {!preview && poses.length === 0 && (
           <div className="camera-empty">
             <div className="camera-icon">
