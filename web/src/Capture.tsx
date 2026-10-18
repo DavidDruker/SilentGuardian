@@ -18,6 +18,7 @@ import {
   type Profile,
   uid,
 } from "./api";
+import { Skeleton } from "./Skeleton";
 const center = (p: Landmark[]) => ({
   x: (p[23].x + p[24].x) / 2,
   y: (p[23].y + p[24].y) / 2,
@@ -424,6 +425,7 @@ export function Capture({
           onEnded={() => void finishUpload()}
         />
         {!preview && <div className="room-grid" />}
+        {preview && poses.length > 0 && <Skeleton poses={poses} selected={selected} />}
         {preview && poses.map((pose, index) => {
           const bounds = personBounds(pose);
           if (!bounds) return null;
