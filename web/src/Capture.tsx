@@ -19,6 +19,7 @@ import {
   uid,
 } from "./api";
 import { Skeleton } from "./Skeleton";
+import { TriageProgress } from "./TriageProgress";
 const center = (p: Landmark[]) => ({
   x: (p[23].x + p[24].x) / 2,
   y: (p[23].y + p[24].y) / 2,
@@ -76,6 +77,8 @@ export function Capture({
   const [verdict, setVerdict] = useState<CaptureResult | null>(null);
   const [verdictBusy, setVerdictBusy] = useState(false);
   const [activeAlert, setActiveAlert] = useState(false);
+  const [activeEventId, setActiveEventId] = useState<string | null>(null);
+  const [activeEvent, setActiveEvent] = useState<GuardianEvent | null>(null);
   const video = useRef<HTMLVideoElement>(null),
     worker = useRef<Worker | null>(null),
     media = useRef<MediaStream | null>(null);
@@ -137,6 +140,8 @@ export function Capture({
     setVerdict(null);
     setVerdictBusy(false);
     setActiveAlert(false);
+    setActiveEventId(null);
+    setActiveEvent(null);
     setVideoAspect(0);
     selectedRef.current = false;
     finishing.current = false;
@@ -153,12 +158,30 @@ export function Capture({
   useEffect(() => {
     if (!profile.consent) stop();
   }, [profile.consent]);
+  useEffect(() => {
+    if (!activeEventId) return;
+    setActiveEvent(null);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      try {
+        const event = await api<GuardianEvent>(`/events/${activeEventId}`);
+        if (cancelled) return;
+        setActiveEvent(event);
+        if (event.verdict_status === "pending") timer = setTimeout(() => void refresh(), 1500);
+      } catch {
+        if (!cancelled) timer = setTimeout(() => void refresh(), 3000);
+      }
+    };
+    void refresh();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [activeEventId]);
 
   const socket = () => {
     sock.current?.close();
     sock.current = connectPose((r) => {
       if (r.quality !== "buffering") setResult(r);
-      if (r.event_id) { setActiveAlert(true); onEvent(); }
+      if (r.event_id) { setActiveAlert(true); setActiveEventId(r.event_id); onEvent(); }
     }, setStatus);
   };
   const choose = (index: number) => {
@@ -195,12 +218,12 @@ export function Capture({
         if (runId.current !== thisRun) return;
         last = await api<CaptureResult>(`/capture-result/${profile.id}/${session.current}`);
         setVerdict(last);
-        if (last.status !== "reviewing") break;
+        if (last.status !== "reviewing" && last.event?.verdict_status !== "pending") break;
         await new Promise((resolve) => setTimeout(resolve, 700));
       }
       if (runId.current === thisRun) {
         setVerdictBusy(false);
-        setStatus(last?.status === "reviewing" ? "Review still in progress" : last?.status === "uncertain" ? "Movement needs review" : "Analysis complete");
+        setStatus(last?.status === "reviewing" || last?.event?.verdict_status === "pending" ? "Review still in progress" : last?.status === "uncertain" ? "Movement needs review" : "Analysis complete");
         onEvent();
       }
     } catch (cause) {
@@ -377,9 +400,6 @@ export function Capture({
       setConsentBusy(false);
     }
   };
-  const trunk = result?.features?.trunk_angle,
-    helper = result?.features?.helper_present,
-    still = result?.features?.still_seconds;
   let signal: { kind: SignalKind; title: string; detail: string } = {
     kind: "warning", title: "Checking movement", detail: "Keep the person clearly in view.",
   };
@@ -402,6 +422,15 @@ export function Capture({
   } else if (result?.quality === "good" && result.accepted) {
     signal = { kind: "good", title: "No concern detected", detail: "The person is identified and monitoring is active." };
   }
+  const triage = <TriageProgress
+    event={verdict?.event ?? activeEvent}
+    candidateDecision={verdict?.candidate_decision}
+    prediction={result?.action_prediction}
+    ruleHits={result?.rule_hits}
+    hasIncident={activeAlert}
+    quality={result?.quality}
+    scoredWindows={verdict?.scored_windows}
+  />;
   return (
     <section className="panel capture-panel">
       <div className="panel-heading">
@@ -490,37 +519,16 @@ export function Capture({
             }}
           />
         </label>
+        {verdict && recordedFrames.current.length > 0 && <button className="secondary small" onClick={exportSkeleton}>Download movement data</button>}
       </div>
       {fileName && <p className="capture-file">{fileName} · Video stays in this browser while movement is analyzed.</p>}
       {(verdictBusy || verdict) && <section className={`capture-verdict status-${signal.kind}`} aria-live="polite">
-        <div className="capture-verdict-heading"><SignalIcon kind={signal.kind} size={28} />
+        <div className="capture-verdict-heading"><SignalIcon kind={signal.kind} size={24} />
           <div><span className="eyebrow">VIDEO ANALYSIS</span><h3>{verdict?.event?.summary || signal.title}</h3></div>
         </div>
-        <p>{signal.detail}</p>
-        {verdict && recordedFrames.current.length > 0 && <button className="secondary small" onClick={exportSkeleton}>Download movement data</button>}
+        {triage}
       </section>}
-      <div className="feature-strip">
-        <div>
-          <span>Posture</span>
-          <strong>{String(result?.features?.posture || "—")}</strong>
-        </div>
-        <div>
-          <span>Trunk angle</span>
-          <strong>{trunk != null && trunk !== "" ? `${trunk}°` : "—"}</strong>
-        </div>
-        <div>
-          <span>Helper nearby</span>
-          <strong>
-            {helper === true ? "Yes" : helper === false ? "No" : "—"}
-          </strong>
-        </div>
-        <div>
-          <span>Still for</span>
-          <strong>
-            {typeof still === "number" ? `${Math.round(still)} s` : "—"}
-          </strong>
-        </div>
-      </div>
+      {preview && !verdictBusy && !verdict && triage}
       {pendingCapture !== undefined && (
         <div className="modal-shade">
           <section

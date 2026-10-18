@@ -129,7 +129,7 @@
 }
 .capture-verdict {
   margin-top: 20px;
-  padding: 20px 22px;
+  padding: 14px 16px;
   border: 1px solid var(--line);
   background: var(--sky-soft);
 }
@@ -141,8 +141,22 @@
 .capture-verdict.status-good .capture-verdict-heading svg { color: #218458; }
 .capture-verdict.status-warning .capture-verdict-heading svg { color: #a57414; }
 .capture-verdict.status-alert .capture-verdict-heading svg { color: #c9343c; }
-.capture-verdict h3 { margin: 5px 0 0; }
-.capture-verdict p { margin: 12px 0; }
+.capture-verdict h3 { margin: 2px 0 0; font-size: 17px; }
+.triage-progress { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.triage-heading { display: flex; justify-content: space-between; gap: 10px; color: var(--navy); font-size: 12px; }
+.triage-heading span { color: var(--slate); }
+.triage-steps { display: flex; gap: 6px; list-style: none; margin: 8px 0 0; padding: 0; }
+.triage-step { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 7px 8px; background: #f1f5fa; color: var(--slate); }
+.triage-step.done { background: #e8f7ee; color: #218458; }
+.triage-step.active { background: #fff3d5; color: #966b11; }
+.triage-step-marker { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border: 1px solid currentColor; border-radius: 50%; font-size: 11px; font-weight: 700; }
+.triage-step > div { display: grid; min-width: 0; gap: 1px; }
+.triage-step strong { color: inherit; font-size: 12px; }
+.triage-step div span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+@media (max-width: 480px) {
+  .triage-step { gap: 4px; padding: 6px 4px; }
+  .triage-step-marker { width: 17px; height: 17px; font-size: 10px; }
+}
 .activity-calendar-panel { min-width: 0; }
 .activity-calendar-scroll { overflow-x: auto; padding: 10px 0 14px; }
 .activity-calendar { width: max-content; padding: 4px 10px 10px 0; }

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { api, type GuardianEvent, type Profile } from "./api";
+import { TriageProgress } from "./TriageProgress";
 
 export const urgencyNames = ["Info", "Review", "Concern", "Urgent"];
 export const pretty = (value: string) => value.replaceAll("_", " ");
@@ -48,6 +49,7 @@ export function EventDetail({
           <button className="icon-button" aria-label="Close alert" onClick={onClose}><X /></button>
         </header>
         <p className="event-summary">{event.summary}</p>
+        {event.source !== "sample" && <TriageProgress event={event} />}
         {metrics.length > 0 && <dl className="metrics-list">
           {metrics.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
         </dl>}
