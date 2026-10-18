@@ -63,7 +63,9 @@ def test_policy_uses_uncertainty_for_unrelated_action_class():
     assert decide(['fall'], 3, {'status': 'scored', 'fall_score': .9}, .5).action == 'supported'
     assert decide(['fall'], 2, {'status': 'scored', 'fall_score': .42}, .4).action == 'supported'
     assert decide(['fall'], 2, {'status': 'scored', 'fall_score': .39}, .4).action == 'rejected'
-    assert decide(['stumble'], 1, {'status': 'scored', 'staggering_score': .42}, .4).action == 'rejected'
+    # Staggering uses its own, lower cutoff: staged stumbles scored 0.14-0.25, walking ~0.
+    assert decide(['stumble'], 1, {'status': 'scored', 'staggering_score': .14}, .4).action == 'supported'
+    assert decide(['stumble'], 1, {'status': 'scored', 'staggering_score': .05}, .4).action == 'rejected'
 
 
 def test_restricted_standing_uses_rules_while_fall_uses_ml(guardian):

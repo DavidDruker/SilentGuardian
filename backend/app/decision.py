@@ -2,7 +2,9 @@
 from dataclasses import dataclass
 
 POLICY_VERSION = 'rules-ml-gemini-v1'
-STAGGER_SCORE_THRESHOLD = .5
+# The NTU60 'staggering' class scores staged stumbles low but clearly above normal
+# walking: 0.06-0.25 on recorded stumbles versus 0.00-0.02 while walking normally.
+STAGGER_SCORE_THRESHOLD = .1
 
 
 @dataclass(frozen=True)
