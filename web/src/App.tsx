@@ -6,7 +6,7 @@ import { ProfileEditor } from "./ProfileEditor";
 import { EventDetail, pretty, timeLabel, urgencyNames } from "./EventDetail";
 import { ContactView } from "./ContactView";
 import { Activity } from "./Activity";
-import { defaultDemoSettings, demoAlerts, readDemoSettings, saveDemoSettings, type DemoSettings } from "./demo-data";
+import { demoAlerts } from "./demo-data";
 
 type Monitoring = { person_id: string; quality: string; online: boolean };
 type Mode = "care" | "personal";
@@ -27,7 +27,6 @@ export default function App() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [events, setEvents] = useState<GuardianEvent[]>([]);
   const [feedError, setFeedError] = useState("");
-  const [demoSettingsByProfile, setDemoSettingsByProfile] = useState<Record<string, DemoSettings>>({});
   const [monitoring, setMonitoring] = useState<Monitoring[]>([]);
   const [mode, setMode] = useState<Mode>(remembered("mode") === "care" ? "care" : "personal");
   const [personId, setPersonId] = useState(remembered("person"));
@@ -56,7 +55,7 @@ export default function App() {
         api<Monitoring[]>("/monitoring"),
       ]);
       if (history.status === "fulfilled") { setEvents(history.value); setFeedError(""); }
-      else setFeedError("Live alerts are temporarily unavailable. Sample alerts are still shown in Alerts.");
+      else setFeedError("Live alerts are temporarily unavailable.");
       if (streams.status === "fulfilled") setMonitoring(streams.value);
     } catch (cause) {
       if (String(cause).includes("Sign in")) setLogged(false);
@@ -95,14 +94,7 @@ export default function App() {
 
   const inMode = profiles.filter((person) => person.mode === mode);
   const profile = inMode.find((person) => person.id === personId) ?? inMode[0];
-  const demoSettings = profile ? demoSettingsByProfile[profile.id] ?? readDemoSettings(profile.id) : defaultDemoSettings;
-  const sampleAlerts = profile ? demoAlerts(profile, demoSettings.alerts) : [];
-  const updateDemoSettings = (change: Partial<DemoSettings>) => {
-    if (!profile) return;
-    const next = { ...demoSettings, ...change };
-    saveDemoSettings(profile.id, next);
-    setDemoSettingsByProfile((current) => ({ ...current, [profile.id]: next }));
-  };
+  const sampleAlerts = profile ? demoAlerts(profile) : [];
   const profileIds = new Set(profiles.map((person) => person.id));
   const visibleEvents = events.filter((event) => profileIds.has(event.person_id) && event.source !== "demo_call");
   const current = visibleEvents.filter((event) => event.person_id === profile?.id);
@@ -112,11 +104,10 @@ export default function App() {
   const checkIn = mode === "personal" && profile?.check_in_first
     ? open.find((event) => event.urgency === 1)
     : undefined;
-  const sorted = [...(page === "events" ? [...current, ...sampleAlerts] : open)].sort(
-    (a, b) => page === "events"
-      ? b.opened_at - a.opened_at
-      : b.urgency - a.urgency || b.opened_at - a.opened_at,
-  );
+  const recent = [...current].sort((a, b) => b.opened_at - a.opened_at).slice(0, 4);
+  const sorted = page === "events"
+    ? [...recent, ...sampleAlerts.slice(0, 4 - recent.length)].sort((a, b) => b.opened_at - a.opened_at)
+    : [...open].sort((a, b) => b.urgency - a.urgency || b.opened_at - a.opened_at);
 
   const login = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -210,7 +201,7 @@ export default function App() {
           {error && <div className="banner error" role="alert"><span>{error}</span>
             <button className="icon-button" onClick={() => setError("")} aria-label="Dismiss error"><X size={16} /></button>
           </div>}
-          {feedError && page !== "activity" && <div className="banner" role="status">{feedError}</div>}
+          {feedError && page === "overview" && <div className="banner" role="status">{feedError}</div>}
           {!profile ? (
             <section className="panel setup-empty">
               <h2>No {mode === "care" ? "residents" : "personal profile"} yet</h2>
@@ -219,17 +210,6 @@ export default function App() {
             </section>
           ) : (
             <>
-              {page !== "overview" && <section className="panel demo-controls" aria-label={`Sample data settings for ${profile.alias}`}>
-                <div><span className="eyebrow">SAMPLE DATA · {profile.alias.toUpperCase()}</span><p>Adjust this profile’s sample display. Settings are saved in this browser.</p></div>
-                <label>Sample alerts <strong>{demoSettings.alerts}</strong>
-                  <input type="range" min="0" max="30" value={demoSettings.alerts}
-                    onChange={(event) => updateDemoSettings({ alerts: Number(event.target.value) })} />
-                </label>
-                <label>Heat map density <strong>{demoSettings.density}%</strong>
-                  <input type="range" min="0" max="100" value={demoSettings.density}
-                    onChange={(event) => updateDemoSettings({ density: Number(event.target.value) })} />
-                </label>
-              </section>}
               {checkIn && <section className="check-in">
                 <div><span className="eyebrow">CHECK-IN</span><h2>Are you okay, {profile.alias}?</h2></div>
                 <button className="primary" onClick={() => void acknowledge(checkIn.id)}>I'm okay</button>
@@ -242,18 +222,17 @@ export default function App() {
                 </div>
                 <Capture key={profile.id} profile={profile} config={config} onEvent={() => void refresh()} onError={setError} />
               </>}
-              {page === "activity" && <Activity key={profile.id} profile={profile} settings={demoSettings} alerts={sampleAlerts} database={config.database} />}
+              {page === "activity" && <Activity key={profile.id} profile={profile} />}
               {page !== "activity" &&
               <section className="panel recent-panel">
-                <div className="panel-heading"><h2>{page === "overview" ? "Open alerts" : "Alert history"}</h2>
-                  {page === "overview" && <button className="text-button" onClick={() => setPage("events")}>View all</button>}
+                <div className="panel-heading"><h2>{page === "overview" ? "Open alerts" : "Recent alerts"}</h2>
+                  {page === "overview" && <button className="text-button" onClick={() => setPage("events")}>View alerts</button>}
                 </div>
-                {page === "events" && <p className="muted">Sample alerts are labeled and do not trigger notifications or acknowledgements.</p>}
                 {sorted.length === 0 ? <div className="empty-events"><h3>{page === "overview" ? "No open alerts" : "No alerts yet"}</h3></div> :
                   <div className="event-list">{sorted.map((event) => (
                     <button className="event-row" key={event.id} onClick={() => setDetail(event.id)}>
                       <div><strong>{event.rule_hits.length ? pretty(event.rule_hits[0]) : "Alert"}</strong>
-                        <p>{event.summary}</p><small>{timeLabel(event.observed_at)} · {event.source === "sample" ? "Sample data" : pretty(event.status)}</small></div>
+                        <p>{event.summary}</p><small>{timeLabel(event.observed_at)}{event.source === "sample" ? "" : ` · ${pretty(event.status)}`}</small></div>
                       <span className={event.status === "open" ? `pill urgency-${event.urgency}` : "pill"}>{urgencyNames[event.urgency]}</span>
                     </button>
                   ))}</div>}

@@ -43,12 +43,11 @@ export function EventDetail({
           <div>
             <span className={`pill urgency-${event.urgency}`}>{urgencyNames[event.urgency]}</span>
             <h2 id="event-title">{event.alias}: {event.rule_hits.length ? pretty(event.rule_hits[0]) : "Alert"}</h2>
-            <p className="muted">{timeLabel(event.observed_at)} · {pretty(event.status)}</p>
+            <p className="muted">{timeLabel(event.observed_at)}{event.source === "sample" ? "" : ` · ${pretty(event.status)}`}</p>
           </div>
           <button className="icon-button" aria-label="Close alert" onClick={onClose}><X /></button>
         </header>
         <p className="event-summary">{event.summary}</p>
-        {event.source === "sample" && <p className="muted">Simulated example for this profile. No notification was sent.</p>}
         {metrics.length > 0 && <dl className="metrics-list">
           {metrics.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
         </dl>}
