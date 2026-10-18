@@ -7,14 +7,18 @@ import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import logging
+
 import httpx
 from PIL import Image, ImageDraw
+from pydantic import ValidationError
 from sqlalchemy import select
 
 from .db import Audit, Candidate, Event, Person, Window
 from .schemas import Verdict
 from .stages import append_stage
 
+log = logging.getLogger('guardian')
 EDGES = [(11,12),(11,23),(12,24),(23,24),(11,13),(13,15),(12,14),(14,16),(23,25),(25,27),(24,26),(26,28)]
 
 
@@ -55,11 +59,20 @@ def event_package(ev, history):
 
 
 def validate_verdict(body, refs, floor):
-    verdict = Verdict.model_validate_json(body)
-    if any(e.ref not in refs for e in verdict.evidence):
+    data = json.loads(body)
+    if not isinstance(data, dict):
+        raise ValueError('Reply is not a JSON object')
+    # Keep a usable review instead of discarding it whole: drop citations of data we
+    # did not send and trim over-long text (the API does not enforce maxLength).
+    cited = [e for e in data.get('evidence') or [] if isinstance(e, dict) and e.get('ref') in refs]
+    if not cited:
         raise ValueError('Evidence references missing data')
-    if any(len(s) > 400 for s in verdict.recommended_actions+verdict.profile_factors):
-        raise ValueError('Response text exceeds limit')
+    data['evidence'] = [{'ref': e['ref'], 'detail': str(e.get('detail', ''))[:300]} for e in cited][:12]
+    data['summary'] = str(data.get('summary', ''))[:400]
+    for name, limit in (('recommended_actions', 5), ('profile_factors', 10)):
+        if isinstance(data.get(name), list):
+            data[name] = [str(item)[:400] for item in data[name]][:limit]
+    verdict = Verdict.model_validate(data)
     # Conservative rejection plus deterministic outgoing notifications: AI never
     # controls recipient, phone, action execution, or notification message content.
     text = json.dumps(verdict.model_dump()).lower()
@@ -67,6 +80,24 @@ def validate_verdict(body, refs, floor):
         raise ValueError('Diagnostic language rejected')
     verdict.urgency = max(floor, verdict.urgency)
     return verdict
+
+
+def describe_failure(exc):
+    """A short, specific reason for a failed review (never includes the API key)."""
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
+        return 'Timed out waiting for Gemini'
+    if isinstance(exc, httpx.HTTPStatusError):
+        try:
+            message = exc.response.json()['error']['message']
+        except Exception:
+            message = exc.response.text
+        return f'Gemini API returned HTTP {exc.response.status_code}: {message[:200]}'
+    if isinstance(exc, httpx.HTTPError):
+        return f'Could not reach Gemini: {type(exc).__name__}'
+    if isinstance(exc, ValidationError):
+        first = exc.errors()[0]
+        return f"Reply did not match the verdict format ({'.'.join(map(str, first['loc']))}: {first['msg']})"[:240]
+    return f'{type(exc).__name__}: {str(exc)[:200]}'
 
 
 class GeminiWorker:
@@ -90,8 +121,12 @@ class GeminiWorker:
                                          headers={'x-goog-api-key': cfg.gemini_api_key},
                                          json={'systemInstruction': {'parts': [{'text': system}]},
                                                'contents': [{'role': 'user', 'parts': parts}],
-                                               'generationConfig': {'responseFormat': {'text': {
-                                                   'mimeType': 'application/json', 'schema': Verdict.model_json_schema()}}}})
+                                               'generationConfig': {
+                                                   # Gemini 3 thinks at its highest level by default, which
+                                                   # can take longer than the review timeout.
+                                                   'thinkingConfig': {'thinkingLevel': 'low'},
+                                                   'responseFormat': {'text': {
+                                                       'mimeType': 'application/json', 'schema': Verdict.model_json_schema()}}}})
             response.raise_for_status()
             return ''.join(part.get('text', '') for part in response.json()['candidates'][0]['content']['parts']
                            if not part.get('thought'))
@@ -156,11 +191,12 @@ class GeminiWorker:
             event_id, floor, frames = ev.id, ev.floor_urgency, ev.keyframes
         started, raw, result, error, proposed = time.monotonic(), None, None, None, None
         try:
-            raw = await asyncio.wait_for(self.request(package, frames), timeout=min(g.settings.gemini_timeout_seconds, 15))
+            raw = await asyncio.wait_for(self.request(package, frames), timeout=g.settings.gemini_timeout_seconds)
             result = validate_verdict(raw, refs, floor)
             proposed = json.loads(raw)['urgency']
         except Exception as exc:
-            error = type(exc).__name__
+            error = describe_failure(exc)
+            log.warning('Gemini review failed for event %s: %s', event_id, error)
         with g.db.lock, g.db.sessions.begin() as s:
             ev = s.get(Event, event_id, with_for_update=True)
             if not ev:
@@ -174,6 +210,7 @@ class GeminiWorker:
                     g.queue(s, ev, g.clock())
             else:
                 ev.verdict_status = 'fallback'
+                ev.features = {**ev.features, 'gemini_error': error}
             if ev.status == 'pending_review':
                 ev.status = 'open'
                 ev.opened_at = ev.updated_at = g.clock()

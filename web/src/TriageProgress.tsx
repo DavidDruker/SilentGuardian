@@ -12,7 +12,7 @@ export function TriageProgress({
   quality,
   scoredWindows = 0,
   geminiBlocker,
-  mlDown = false,
+  mlNote,
 }: {
   event?: GuardianEvent | null;
   candidateDecision?: string | null;
@@ -22,7 +22,7 @@ export function TriageProgress({
   quality?: string;
   scoredWindows?: number;
   geminiBlocker?: string;
-  mlDown?: boolean;
+  mlNote?: string;
 }) {
   const action = prediction ?? event?.action_prediction;
   const hasRuleHit = Boolean(event || candidateDecision || ruleHits.length || hasIncident);
@@ -34,9 +34,9 @@ export function TriageProgress({
 
   let ml: Stage = { label: "ML", detail: "Not used", state: "skipped" };
   if (hasRuleHit) {
-    if (mlDown) {
+    if (mlNote) {
       // Without the model only the fall and stillness safety rules can raise alerts.
-      ml = { label: "ML", detail: "Not running on server", state: "skipped" };
+      ml = { label: "ML", detail: mlNote, state: "skipped" };
     } else if (candidateDecision === "fallback_open" || event?.verdict_status === "model_fallback") {
       // Stillness on the floor: the safety rule raised it (Gemini still reviews it).
       ml = { label: "ML", detail: "Safety rule", state: "done" };
@@ -62,7 +62,7 @@ export function TriageProgress({
   } else if (event?.verdict_status === "validated") {
     gemini = { label: "Gemini", detail: "Reviewed", state: "done" };
   } else if (event?.verdict_status === "fallback") {
-    gemini = { label: "Gemini", detail: "Review unavailable", state: "done" };
+    gemini = { label: "Gemini", detail: "Review failed, reason in log", state: "done" };
   } else if (event?.verdict_status === "privacy_blocked") {
     gemini = { label: "Gemini", detail: "Consent blocked", state: "skipped" };
   } else if (["model_supported_no_gemini", "model_fallback"].includes(event?.verdict_status ?? "")) {

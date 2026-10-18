@@ -510,7 +510,9 @@ export function Capture({
     candidateDecision={verdict?.candidate_decision ?? lastDecision}
     prediction={lastScored.current ?? result?.action_prediction}
     geminiBlocker={geminiBlocker}
-    mlDown={Boolean(mlState) && mlState !== "ready"}
+    mlNote={!mlState || mlState === "ready" ? undefined
+      : mlState === "disabled" ? "Turned off on server"
+      : mlState === "unavailable" ? "Not installed on server" : "Starting on server"}
     ruleHits={result?.rule_hits}
     hasIncident={logged > 0}
     quality={result?.quality}
@@ -526,6 +528,8 @@ export function Capture({
         <time>{alertTime(event)}</time>
         <span className="alert-log-name">{CONCERN_NAMES[event.rule_hits[0]] ?? event.summary}</span>
         <span className="alert-log-meta">{urgencyNames[event.urgency] ?? event.urgency} · {REVIEW_LABELS[event.verdict_status] ?? event.verdict_status.replaceAll("_", " ")}</span>
+        {event.verdict_status === "fallback" && typeof event.features?.gemini_error === "string" &&
+          <span className="alert-log-error">{event.features.gemini_error}</span>}
       </li>)}
     </ol>
   </section>;

@@ -132,7 +132,8 @@ def create_app(cfg: Settings = settings, db=None, clock=time.time):
     def config():
         return {'demo_enabled': cfg.demo_enabled, 'notification_mode': cfg.notification_mode,
                 'gemini_configured': bool(cfg.gemini_api_key), 'push_public_key': cfg.vapid_public_key,
-                'ml_state': guardian.actions.state, 'decision_mode': cfg.decision_mode,
+                'ml_state': guardian.actions.state, 'ml_error': guardian.actions.error,
+                'decision_mode': cfg.decision_mode,
                 'calls_configured': bool(cfg.calls_enabled and cfg.demo_call_to and cfg.twilio_account_sid and cfg.twilio_auth_token and cfg.twilio_from_number),
                 'database': 'local SQLite' if cfg.database_url.startswith('sqlite') else 'PostgreSQL',
                 'personalization': 'automatic_daily_weighted_median_mad',

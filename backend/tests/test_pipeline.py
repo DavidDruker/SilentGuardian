@@ -244,6 +244,8 @@ def test_gemini_transport_validates_multipart_response(guardian, monkeypatch):
     assert received['headers']['x-goog-api-key'] == 'test'
     assert received['url'].endswith('/gemini-3.8-flash:generateContent')
     assert received['json']['generationConfig']['responseFormat']['text']['mimeType'] == 'application/json'
+    # Gemini 3 defaults to high thinking, which can outlast the review timeout.
+    assert received['json']['generationConfig']['thinkingConfig'] == {'thinkingLevel': 'low'}
 
 
 @pytest.mark.parametrize('failure',['timeout','malformed','raised'])
@@ -267,6 +269,7 @@ def test_gemini_failure_preserves_alert(guardian,failure):
     asyncio.run(w.tick())
     ev=guardian.events()[0]
     assert ev.urgency>=2 and ev.verdict_status=='fallback' and ev.notifications
+    assert ev.features['gemini_error']  # the reason is kept for the alert log
 
 
 def test_manual_call_dry_run_idempotent(guardian):
@@ -461,3 +464,20 @@ def test_posture_holds_until_reading_clearly_changes():
     assert classify_posture(38, .6, .2, .2, previous='standing') == 'standing'
     assert classify_posture(45, .6, .2, .2, previous='standing') == 'sitting'
     assert classify_posture(55, .3, .3, .2, previous='lying') == 'lying'
+
+
+def test_gemini_reply_keeps_valid_citations_and_trims_long_text():
+    body = json.loads(verdict_json())
+    body['evidence'].append({'ref': 'metric.invented', 'detail': 'Not in the package'})
+    body['summary'] = 'x' * 900
+    verdict = validate_verdict(json.dumps(body), {'rule.fall'}, 2)
+    assert [e.ref for e in verdict.evidence] == ['rule.fall'] and len(verdict.summary) == 400
+
+
+def test_failed_review_records_the_reason():
+    from backend.app.gemini import describe_failure
+    request = httpx.Request('POST', 'https://example.test')
+    response = httpx.Response(404, json={'error': {'message': 'models/x is not found'}}, request=request)
+    error = httpx.HTTPStatusError('not found', request=request, response=response)
+    assert describe_failure(error) == 'Gemini API returned HTTP 404: models/x is not found'
+    assert describe_failure(asyncio.TimeoutError()) == 'Timed out waiting for Gemini'

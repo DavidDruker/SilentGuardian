@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     personalization_timezone: str = 'America/Toronto'
     gemini_api_key: str = ''
     gemini_model: str = 'gemini-3.8-flash'
-    gemini_timeout_seconds: float = 15
+    gemini_timeout_seconds: float = 30
     gemini_billed_project_confirmed: bool = False
     notification_mode: str = 'dry_run'
     twilio_account_sid: str = ''
