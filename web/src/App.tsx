@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronRight, Settings2, X } from "lucide-react";
 import { api, type AppConfig, type GuardianEvent, type Profile } from "./api";
 import { Capture } from "./Capture";
@@ -9,14 +9,26 @@ import { Activity } from "./Activity";
 
 type Monitoring = { person_id: string; quality: string; online: boolean };
 type Mode = "care" | "personal";
+const visibleProfile = (person: Profile) =>
+  !(person.data_category === "synthetic" && ["margaret", "daniel"].includes(person.id));
+
+// Per-browser convenience only: profiles live in the database, this just reopens
+// the workspace and person that were selected before a reload.
+const remembered = (key: string) => {
+  try { return localStorage.getItem(`hayvn.${key}`) ?? ""; } catch { return ""; }
+};
+const remember = (key: string, value: string) => {
+  try { localStorage.setItem(`hayvn.${key}`, value); } catch { /* storage unavailable */ }
+};
 
 export default function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [events, setEvents] = useState<GuardianEvent[]>([]);
   const [monitoring, setMonitoring] = useState<Monitoring[]>([]);
-  const [mode, setMode] = useState<Mode>("personal");
-  const [personId, setPersonId] = useState("");
+  const [mode, setMode] = useState<Mode>(remembered("mode") === "care" ? "care" : "personal");
+  const [personId, setPersonId] = useState(remembered("person"));
+  const restored = useRef(false);
   const [logged, setLogged] = useState(false);
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
@@ -33,19 +45,15 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [people, history, streams] = await Promise.all([
-        api<Profile[]>("/profiles"),
+      const people = await api<Profile[]>("/profiles");
+      setProfiles(people.filter(visibleProfile));
+      setLogged(true);
+      const [history, streams] = await Promise.all([
         api<GuardianEvent[]>("/events"),
         api<Monitoring[]>("/monitoring"),
       ]);
-      // Hide only the two known legacy fixture profiles. Older user-created
-      // profiles may also have inherited the former "synthetic" default.
-      setProfiles(people.filter((person) =>
-        !(person.data_category === "synthetic" && ["margaret", "daniel"].includes(person.id))
-      ));
       setEvents(history);
       setMonitoring(streams);
-      setLogged(true);
     } catch (cause) {
       if (String(cause).includes("Sign in")) setLogged(false);
       else setError(String(cause));
@@ -58,9 +66,28 @@ export default function App() {
   }, [refresh]);
   useEffect(() => {
     if (!logged || hash.startsWith("#contact/")) return;
-    const interval = setInterval(() => void refresh(), 2000);
-    return () => clearInterval(interval);
+    // Schedule the next poll only after the previous one finishes, so slow
+    // database responses cannot pile up overlapping requests.
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = () => {
+      timer = setTimeout(() => void refresh().finally(() => { if (!stopped) poll(); }), 2000);
+    };
+    poll();
+    return () => { stopped = true; clearTimeout(timer); };
   }, [logged, hash, refresh]);
+
+  useEffect(() => remember("mode", mode), [mode]);
+  useEffect(() => { if (personId) remember("person", personId); }, [personId]);
+  useEffect(() => {
+    // On the first load only, open the workspace that holds the remembered person,
+    // or the other workspace if this one is empty. Later mode clicks are respected.
+    if (restored.current || profiles.length === 0) return;
+    restored.current = true;
+    const target = profiles.find((person) => person.id === personId)
+      ?? (profiles.some((person) => person.mode === mode) ? undefined : profiles[0]);
+    if (target && target.mode !== mode) setMode(target.mode as Mode);
+  }, [profiles, personId, mode]);
 
   const inMode = profiles.filter((person) => person.mode === mode);
   const profile = inMode.find((person) => person.id === personId) ?? inMode[0];
@@ -151,6 +178,7 @@ export default function App() {
       <div className="main-shell">
         <header className="topbar">
           <div className="breadcrumb">Hayvn <ChevronRight size={14} /> <strong>{page === "overview" ? "Overview" : page === "events" ? "Alerts" : "Activity"}</strong></div>
+          <span className="storage-label">Storage: {config.database}</span>
         </header>
         <main className="workspace mvp-workspace">
           <div className="page-heading">
@@ -211,7 +239,12 @@ export default function App() {
         </main>
       </div>
       {editing && <ProfileEditor profile={editing === "existing" ? profile : undefined} mode={mode} onClose={() => setEditing(null)}
-        onSaved={(saved) => { setPersonId(saved.id); void refresh(); }} />}
+        onSaved={(saved) => {
+          setProfiles((current) => [...current.filter((person) => person.id !== saved.id), saved].filter(visibleProfile));
+          setMode(saved.mode as Mode);
+          setPersonId(saved.id);
+          void refresh();
+        }} />}
       {selectedEvent && <EventDetail event={selectedEvent} profile={profile}
         onClose={() => setDetail(null)} onChange={() => void refresh()} onError={setError} />}
     </div>

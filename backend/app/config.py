@@ -62,6 +62,8 @@ class Settings(BaseSettings):
         except ZoneInfoNotFoundError as exc:
             raise ValueError('PERSONALIZATION_TIMEZONE must be a valid IANA timezone') from exc
         if self.app_env == 'production':
+            if not self.database_url.startswith('postgresql+psycopg://'):
+                raise ValueError('Production requires DATABASE_URL=postgresql+psycopg://... for the Tiger Data service.')
             if len(self.operator_token) < 32 or len(self.signing_secret) < 32 or 'local-demo' in self.signing_secret:
                 raise ValueError('Production requires unique operator and signing secrets of at least 32 characters.')
             # Labelled synthetic replays may stay on for a hosted demo; secrets and HTTPS never relax.

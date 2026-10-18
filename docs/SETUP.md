@@ -12,6 +12,8 @@ without gating alerts. See [ACTION_MODEL.md](ACTION_MODEL.md) and
 
 Copy `.env.example` to **`.env` in the repository root**. Never commit `.env`; the browser must not receive provider credentials. For Vultr, put the same `.env` beside `compose.yaml` on the VM, restricted to its owner. Restart the app after changes. These are the fields to update when credentials become available:
 
+Without `DATABASE_URL`, development uses `data/guardian.db` (SQLite). The app shows its active storage type in the top bar. Production refuses to start without a `postgresql+psycopg://` URL so profile saves cannot silently go to a local SQLite file. Setting a Tiger URL does not transfer existing SQLite profiles; migrate those rows separately if needed.
+
 | Integration | Values in root `.env` | Where to obtain them |
 | --- | --- | --- |
 | Tiger Data | `DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:PORT/DB?sslmode=require` | Provisioned service connection details; URL-encode special characters in credentials |

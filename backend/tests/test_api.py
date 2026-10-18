@@ -98,8 +98,12 @@ def test_production_allows_labelled_demo_but_never_weak_secrets():
     from backend.app.config import Settings
     strong = dict(app_env='production', operator_token='o'*40, signing_secret='s'*40,
                   public_url='https://guardian.example', demo_enabled=True)
-    Settings.model_construct(**strong).validate_runtime()
+    Settings.model_construct(**{**strong, 'database_url': 'postgresql+psycopg://example:secret@localhost/guardian'}).validate_runtime()
+    with pytest.raises(ValueError, match='DATABASE_URL'):
+        Settings.model_construct(**strong).validate_runtime()
     with pytest.raises(ValueError, match='secrets'):
-        Settings.model_construct(**{**strong, 'signing_secret': 'local-demo-signing-secret-change-before-deploy'}).validate_runtime()
+        Settings.model_construct(**{**strong, 'database_url': 'postgresql+psycopg://example:secret@localhost/guardian',
+                                    'signing_secret': 'local-demo-signing-secret-change-before-deploy'}).validate_runtime()
     with pytest.raises(ValueError, match='HTTPS'):
-        Settings.model_construct(**{**strong, 'public_url': 'http://guardian.example'}).validate_runtime()
+        Settings.model_construct(**{**strong, 'database_url': 'postgresql+psycopg://example:secret@localhost/guardian',
+                                    'public_url': 'http://guardian.example'}).validate_runtime()

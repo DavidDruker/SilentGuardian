@@ -56,6 +56,11 @@
 }
 
 /* Focused monitoring workspace */
+.storage-label {
+  margin-left: auto;
+  color: var(--slate);
+  font-size: 13px;
+}
 .mvp-workspace {
   max-width: 1160px;
   padding-bottom: 64px;
