@@ -216,6 +216,10 @@ class IngestResult(StrictModel):
     baseline_contributions: list[dict] = Field(default_factory=list)
     baseline_state: str = 'uncalibrated'
     action_prediction: dict | None = None
+    # What is wrong right now, if anything: an alerted rule that is still firing,
+    # 'on_floor' after an alerted fall, or 'on_floor_watch' after an unconfirmed drop.
+    concern: str | None = None
+    candidate_decision: str | None = None
 
 
 class Login(StrictModel):

@@ -4,8 +4,8 @@ The local app works without cloud credentials. Real Gemini verdicts, Tiger Data 
 
 The optional ST-GCN++ classifier needs no provider credentials. Run
 `python scripts/dev.py --with-action-model --build` locally. Compose packages it
-in the dedicated ML service. The default `DECISION_MODE=shadow` records predictions
-without gating alerts. See [ACTION_MODEL.md](ACTION_MODEL.md) and
+in the dedicated ML service, or set `WITH_ACTION_MODEL=1` to build it into the app
+image. The default `DECISION_MODE=enforce` uses it as the alert gate. See [ACTION_MODEL.md](ACTION_MODEL.md) and
 [the three-stage demo guide](THREE_STAGE_DEMO.md).
 
 ## Configuration locations
@@ -17,7 +17,7 @@ Without `DATABASE_URL`, development uses `data/guardian.db` (SQLite). The app sh
 | Integration | Values in root `.env` | Where to obtain them |
 | --- | --- | --- |
 | Tiger Data | `DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:PORT/DB?sslmode=require` | Provisioned service connection details; URL-encode special characters in credentials |
-| Gemini | `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_BILLED_PROJECT_CONFIRMED=true` | An API project associated with active billing; verify billing and model access, then record per-profile Gemini consent in the app |
+| Gemini | `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_BILLED_PROJECT_CONFIRMED=true` | An API project associated with active billing; verify billing and model access. ML-supported alerts are then reviewed automatically |
 | Vultr | `PUBLIC_URL`, `ALLOWED_ORIGINS`, `APP_ENV=production`, `DEMO_ENABLED`, `DOMAIN` | VM hostname/domain and DNS. SSH access is needed to deploy; the app does not need a Vultr API key |
 | Operator sign-in | `OPERATOR_TOKEN`, `SIGNING_SECRET` | Generate two independent random secrets of at least 32 characters; replace the local defaults |
 | Web push | `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT` | Generate a VAPID key pair; use an appropriate `mailto:` contact for the subject |

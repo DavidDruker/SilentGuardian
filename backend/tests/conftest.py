@@ -26,13 +26,15 @@ def guardian(tmp_path, clock):
     db=Database(f'sqlite:///{tmp_path / "test.db"}')
     db.create()
     # Do not inherit live credentials or switches from the developer's .env.
-    g=Guardian(db, Settings.model_construct(worker_enabled=False, demo_enabled=True), clock)
+    # Rules-focused tests use shadow mode; gate tests switch to enforce explicitly.
+    g=Guardian(db, Settings.model_construct(worker_enabled=False, demo_enabled=True, decision_mode='shadow'), clock)
     g.seed()
     return g
 
 
 @pytest.fixture
 def client(tmp_path, clock):
-    cfg=Settings.model_construct(database_url=f'sqlite:///{tmp_path / "api.db"}', worker_enabled=False, demo_enabled=True)
+    cfg=Settings.model_construct(database_url=f'sqlite:///{tmp_path / "api.db"}', worker_enabled=False, demo_enabled=True,
+                                 decision_mode='shadow')
     with TestClient(create_app(cfg, clock=clock)) as client:
         yield client

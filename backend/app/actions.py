@@ -49,7 +49,7 @@ class ActionWorker:
             return dict(model=MODEL_ID, mode=self.g.settings.action_model_mode, state=self.state,
                         error=self.error, preprocessing=PREPROCESSING, queued=len(self.pending),
                         completed=self.completed, replaced=self.replaced, failed=self.failed,
-                        alert_authority=False, parameters=getattr(self.model, 'parameter_count', None))
+                        alert_authority=self.g.settings.decision_mode == 'enforce', parameters=getattr(self.model, 'parameter_count', None))
 
     def latest(self, stream_id):
         with self.lock:
@@ -137,8 +137,7 @@ class ActionWorker:
         if not candidate or candidate.event_id != event.id or policy.action != 'supported':
             return
         cfg = self.g.settings
-        review = bool(cfg.gemini_api_key and cfg.gemini_billed_project_confirmed
-                      and person.body.get('gemini_consent') and event.profile.get('gemini_consent'))
+        review = bool(cfg.gemini_api_key and cfg.gemini_billed_project_confirmed)
         candidate.decision, candidate.reason, candidate.model_result = 'supported', policy.reason, result
         event.verdict_status = 'pending' if review else 'model_supported_no_gemini'
         append_stage(session, person_id=event.person_id, candidate_id=candidate.id, event_id=event.id,

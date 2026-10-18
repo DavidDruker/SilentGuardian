@@ -41,8 +41,9 @@ export function TriageProgress({
     } else if (candidateDecision === "hold") {
       ml = { label: "ML", detail: "Held for review", state: "done" };
     } else if (candidateDecision === "fallback_open" || event?.verdict_status === "model_fallback") {
-      ml = { label: "ML", detail: "Unavailable", state: "done" };
-    } else if (action?.status === "scored") {
+      // Stillness on the floor, or no model available: the safety rule raised it.
+      ml = { label: "ML", detail: "Safety rule", state: "done" };
+    } else if (action?.status === "scored" && action?.mode === "shadow") {
       ml = { label: "ML", detail: "Shadow only", state: "skipped" };
     } else if (action?.status === "pending") {
       ml = { label: "ML", detail: "Shadow running", state: "skipped" };

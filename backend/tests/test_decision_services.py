@@ -99,14 +99,15 @@ def test_gemini_receives_context_only_after_ml_support(guardian):
     guardian.settings.gemini_api_key = 'test'
     guardian.settings.gemini_billed_project_confirmed = True
     profile = next(p for p in guardian.profiles() if p.id == 'daniel')
-    guardian.save_profile(profile.model_copy(update={'gemini_consent': True}))
     guardian.score_candidate = lambda candidate, samples: {
         'status': 'scored', 'model': 'test', 'fall_score': .9,
         'staggering_score': .01, 'latency_ms': 1,
     }
     for frame in scenario_frames('fall', 'daniel'):
         guardian.ingest(frame)
-    assert guardian.events() == []  # Supported candidate waits for contextual review.
+    # The ML-supported alert opens (and notifies) now; Gemini reviews it afterwards.
+    opened = guardian.events()[0]
+    assert opened.status == 'open' and opened.verdict_status == 'pending' and opened.notifications
     captured = {}
     async def review(package, frames):
         captured.update(package)

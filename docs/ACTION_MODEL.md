@@ -2,10 +2,11 @@
 
 Silent Guardian runs the official **ST-GCN++ NTU60 2D joint checkpoint** on the
 backend CPU. Capture and event detail show predictions beside the existing
-detector. This is **shadow evaluation**: the model cannot create, suppress,
-escalate, or deliver alerts. When a score supports an open alert's rule, that
-alert is sent to Gemini review with the supporting scores as evidence; Gemini
-may raise urgency but never below the rule's floor.
+detector. By default (`DECISION_MODE=enforce`) it is the **alert gate**: a rule
+hit is a candidate, and only a candidate whose rule the model supports becomes
+an alert. Stillness on the floor after a drop, and an unavailable model, fall
+back to the deterministic rule. Supported alerts go to Gemini review with the
+scores as evidence; Gemini may raise urgency but never lower it.
 
 ## Run
 
@@ -21,7 +22,7 @@ optional runtime/checkpoint; the interface reports that setup is required.
 Root `.env` settings (defaults are also in `.env.example`):
 
 ```dotenv
-ACTION_MODEL_MODE=shadow
+ACTION_MODEL_MODE=on
 ACTION_MODEL_PATH=models/stgcnpp-ntu60-2d.pth
 ACTION_MODEL_THREADS=2
 ```

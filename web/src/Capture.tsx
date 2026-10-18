@@ -21,6 +21,29 @@ import {
 import { Skeleton } from "./Skeleton";
 import { TriageProgress } from "./TriageProgress";
 import { PoseStabilizer } from "./poseFilter";
+import { urgencyNames } from "./EventDetail";
+
+const CONCERN_NAMES: Record<string, string> = {
+  fall: "Possible fall",
+  restricted_standing: "Standing during restricted hours",
+  stumble: "Stumble",
+  sway: "Sway",
+  bed_exit: "Bed exit",
+  prolonged_stillness: "Still on the floor",
+  personal_baseline: "Unusual movement",
+};
+const REVIEW_LABELS: Record<string, string> = {
+  pending: "Gemini reviewing",
+  validated: "Gemini reviewed",
+  fallback: "Gemini unavailable",
+  model_supported_no_gemini: "ML confirmed",
+  model_fallback: "Safety rule",
+  rules_only: "Rule alert",
+};
+const clipTime = (seconds: number) => {
+  const s = Math.max(0, seconds);
+  return `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
+};
 
 // Show a new status only after it has held for a moment, so per-frame wobble
 // between two readings does not make the status card flicker.
@@ -86,20 +109,18 @@ export function Capture({
   const [videoAspect, setVideoAspect] = useState(0);
   const [verdict, setVerdict] = useState<CaptureResult | null>(null);
   const [verdictBusy, setVerdictBusy] = useState(false);
-  const [activeAlert, setActiveAlert] = useState(false);
-  const [activeEventIds, setActiveEventIds] = useState<string[]>([]);
-  const [activeEventId, setActiveEventId] = useState<string | null>(null);
-  const [activeEvent, setActiveEvent] = useState<GuardianEvent | null>(null);
+  // What is wrong at this moment (from the latest clear reading), separate from
+  // the log of alerts raised earlier in the session.
+  const [concern, setConcern] = useState<string | null>(null);
+  const [alertLog, setAlertLog] = useState<GuardianEvent[]>([]);
+  const [lastDecision, setLastDecision] = useState<string | null>(null);
   const video = useRef<HTMLVideoElement>(null),
     worker = useRef<Worker | null>(null),
     media = useRef<MediaStream | null>(null);
   const [pendingCapture, setPendingCapture] = useState<File | null | undefined>(
     undefined,
   );
-  // Start from the profile's saved choice: saving consent with an unticked box
-  // would otherwise revoke Gemini review on every new capture.
-  const [sendGemini, setSendGemini] = useState(Boolean(profile.gemini_consent)),
-    [consentBusy, setConsentBusy] = useState(false);
+  const [consentBusy, setConsentBusy] = useState(false);
   const active = useRef(false),
     busy = useRef(false),
     raf = useRef(0),
@@ -150,11 +171,10 @@ export function Capture({
     setFileName("");
     setVerdict(null);
     setVerdictBusy(false);
-    setActiveAlert(false);
-    setActiveEventIds([]);
+    setConcern(null);
+    setAlertLog([]);
+    setLastDecision(null);
     seenEventIds.current.clear();
-    setActiveEventId(null);
-    setActiveEvent(null);
     setVideoAspect(0);
     selectedRef.current = false;
     finishing.current = false;
@@ -166,43 +186,44 @@ export function Capture({
     stop();
     setResult(null);
     setSource("");
-    setSendGemini(Boolean(profile.gemini_consent));
   }, [profile.id]);
   useEffect(() => {
     if (!profile.consent) stop();
   }, [profile.consent]);
+  const loadAlert = async (id: string) => {
+    const thisRun = runId.current;
+    try {
+      const event = await api<GuardianEvent>(`/events/${id}`);
+      if (runId.current !== thisRun) return;
+      setAlertLog((log) => [...log.filter((item) => item.id !== id), event]
+        .sort((a, b) => a.observed_at - b.observed_at));
+    } catch {
+      // The pending refresh below retries entries still under review.
+    }
+  };
   useEffect(() => {
-    if (!activeEventId) return;
-    setActiveEvent(null);
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const refresh = async () => {
-      try {
-        const event = await api<GuardianEvent>(`/events/${activeEventId}`);
-        if (cancelled) return;
-        setActiveEvent(event);
-        if (event.verdict_status === "pending") timer = setTimeout(() => void refresh(), 1500);
-      } catch {
-        if (!cancelled) timer = setTimeout(() => void refresh(), 3000);
-      }
-    };
-    void refresh();
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [activeEventId]);
+    const pending = alertLog.filter((event) => event.verdict_status === "pending");
+    if (!pending.length) return;
+    const timer = setTimeout(() => pending.forEach((event) => void loadAlert(event.id)), 1500);
+    return () => clearTimeout(timer);
+  }, [alertLog]);
 
   const socket = () => {
     sock.current?.close();
     sock.current = connectPose((r) => {
       if (r.quality !== "buffering") setResult(r);
       if (r.action_prediction?.status === "scored") lastScored.current = r.action_prediction;
+      if (r.candidate_decision) setLastDecision(r.candidate_decision);
+      // Only a clear reading can say the person is fine; an unclear frame keeps
+      // the last concern (someone down on the floor often tracks poorly).
+      if (r.quality === "good") setConcern(r.concern ?? null);
       const ids = r.event_ids?.length ? r.event_ids : r.event_id ? [r.event_id] : [];
-      if (ids.length) {
-        setActiveAlert(true);
-        setActiveEventIds(ids);
-        setActiveEventId(r.event_id ?? ids[0]);
-        if (ids.some((id) => !seenEventIds.current.has(id))) onEvent();
-        ids.forEach((id) => seenEventIds.current.add(id));
-      }
+      const fresh = ids.filter((id) => !seenEventIds.current.has(id));
+      fresh.forEach((id) => {
+        seenEventIds.current.add(id);
+        void loadAlert(id);
+      });
+      if (fresh.length) onEvent();
     }, setStatus);
   };
   const choose = () => {
@@ -236,6 +257,7 @@ export function Capture({
         if (runId.current !== thisRun) return;
         last = await api<CaptureResult>(`/capture-result/${profile.id}/${session.current}`);
         setVerdict(last);
+        setAlertLog([...last.events].sort((a, b) => a.observed_at - b.observed_at));
         if (last.status !== "reviewing" && last.event?.verdict_status !== "pending") break;
         await new Promise((resolve) => setTimeout(resolve, 700));
       }
@@ -385,7 +407,7 @@ export function Capture({
     try {
       await api(`/privacy/${profile.id}/consent`, "POST", {
         accepted,
-        gemini: accepted && sendGemini,
+        gemini: accepted,
         local_preview: accepted,
       });
       const file = pendingCapture;
@@ -402,64 +424,67 @@ export function Capture({
   let signal: { kind: SignalKind; title: string; detail: string } = {
     kind: "warning", title: "Checking movement", detail: "Keep the person clearly in view.",
   };
-  const alertCount = verdict?.events?.length ?? activeEventIds.length;
+  const logged = alertLog.length;
+  const loggedNote = `${logged} alert${logged === 1 ? "" : "s"} logged below.`;
   if (preview && people > 1 && !verdict) {
     signal = { kind: "warning", title: "One person only", detail: "Clear the room before monitoring continues." };
-  } else if (activeAlert || verdict?.events?.length) {
-    signal = { kind: "alert", title: alertCount > 1 ? `${alertCount} concerns detected` : "Concern detected", detail: "Review the alerts for details." };
+  } else if (concern === "on_floor") {
+    signal = { kind: "alert", title: "Person is on the floor", detail: verdict
+      ? "The video ended with them still down after the fall." : "Down since the fall and not up yet." };
+  } else if (concern && concern !== "on_floor_watch") {
+    signal = { kind: "alert", title: CONCERN_NAMES[concern] ?? concern.replaceAll("_", " "), detail: "Happening now. " + loggedNote };
+  } else if (concern === "on_floor_watch") {
+    signal = { kind: "warning", title: "Person on the floor", detail: verdict
+      ? "No fall was confirmed, but the video ended with them on the floor." : "No fall confirmed. Watching whether they get up." };
   } else if (verdictBusy && !verdict) {
     signal = { kind: "warning", title: "Reviewing video", detail: "Checking the recorded movement." };
-  } else if (verdict?.status === "uncertain" || verdict?.status === "reviewing" || (verdict && !verdict.scored_windows)) {
+  } else if (verdict?.status === "uncertain" || (verdict && !verdict.scored_windows)) {
     signal = { kind: "warning", title: "Result uncertain", detail: "Try a clearer video with the person fully visible." };
-  } else if (verdict?.status === "ready") {
-    signal = { kind: "good", title: "No concern detected", detail: "No alert was triggered in this video." };
+  } else if (verdict) {
+    signal = { kind: "good", title: logged ? "Person appears fine now" : "No concern detected",
+      detail: logged ? loggedNote : "No alert was triggered in this video." };
   } else if (status.includes("Reconnecting") || status.includes("interrupted") || status.includes("expired")) {
     signal = { kind: "warning", title: "Connection interrupted", detail: "Monitoring may be paused." };
   } else if (lost.current) {
     signal = { kind: "warning", title: "Person not visible", detail: "Keep one person clearly in view." };
   } else if (!selectedRef.current) {
     signal = { kind: "warning", title: "Waiting for one person", detail: "Monitoring starts when one person is visible." };
-  } else if (result?.quality === "uncertain" || result?.rule_hits?.length) {
+  } else if (result?.quality === "uncertain") {
     signal = { kind: "warning", title: "Movement uncertain", detail: "Continue monitoring for a clearer reading." };
   } else if (result?.quality === "good" && result.accepted) {
-    signal = { kind: "good", title: "No concern detected", detail: "One person is in view and monitoring is active." };
+    signal = { kind: "good", title: logged ? "Person appears fine now" : "No concern detected",
+      detail: logged ? loggedNote : "One person is in view and monitoring is active." };
   }
   const signalKey = `${signal.kind}|${signal.title}`;
   signals.current.set(signalKey, signal);
   const shownKey = useSteady(signalKey, 700, signal.kind === "alert" || verdictBusy || Boolean(verdict) || !preview);
   const shown = signals.current.get(shownKey) ?? signal;
   const geminiBlocker = !config.gemini_configured ? "No API key on server"
-    : !config.gemini_billed_project_confirmed ? "Billing not confirmed on server"
-    : !profile.gemini_consent ? "Not allowed for this profile" : undefined;
+    : !config.gemini_billed_project_confirmed ? "Billing not confirmed on server" : undefined;
+  const latestAlert = alertLog.at(-1) ?? verdict?.event ?? null;
   const triage = <TriageProgress
-    event={verdict?.event ?? activeEvent}
-    candidateDecision={verdict?.candidate_decision}
+    event={latestAlert}
+    candidateDecision={verdict?.candidate_decision ?? lastDecision}
     prediction={lastScored.current ?? result?.action_prediction}
     geminiBlocker={geminiBlocker}
     ruleHits={result?.rule_hits}
-    hasIncident={activeAlert}
+    hasIncident={logged > 0}
     quality={result?.quality}
     scoredWindows={verdict?.scored_windows}
   />;
-  const analyzedEvent = verdict?.event;
-  const concernNames: Record<string, string> = {
-    fall: "Possible fall",
-    restricted_standing: "Standing during restricted hours",
-    stumble: "Stumble",
-    sway: "Sway",
-    bed_exit: "Bed exit",
-    prolonged_stillness: "Prolonged stillness",
-    personal_baseline: "Unusual movement",
-  };
-  const concerns = [...new Set(verdict?.events?.flatMap((event) => event.rule_hits) ?? [])]
-    .map((hit) => concernNames[hit] ?? hit.replaceAll("_", " "));
-  const analysisTitle = alertCount > 1 ? (concerns.length ? concerns.join(" · ") : `${alertCount} alerts recorded`)
-    : analyzedEvent?.verdict_status === "validated" ? analyzedEvent.summary
-    : analyzedEvent?.verdict_status === "pending" ? "Gemini review in progress"
-    : analyzedEvent?.verdict_status === "rules_only" ? "Rule alert recorded"
-    : analyzedEvent?.verdict_status === "model_fallback" ? "Rule alert · ML unavailable"
-    : analyzedEvent?.verdict_status === "model_supported_no_gemini" ? "ML-supported alert"
-    : shown.title;
+  const alertTime = (event: GuardianEvent) => sourceRef.current === "upload"
+    ? clipTime(event.observed_at - replayTime.current)
+    : new Date(event.observed_at * 1000).toLocaleTimeString();
+  const alertLogSection = logged > 0 && <section className="alert-log" aria-label="Alert log">
+    <strong>Alert log</strong>
+    <ol>
+      {alertLog.map((event) => <li key={event.id}>
+        <time>{alertTime(event)}</time>
+        <span className="alert-log-name">{CONCERN_NAMES[event.rule_hits[0]] ?? event.summary}</span>
+        <span className="alert-log-meta">{urgencyNames[event.urgency] ?? event.urgency} · {REVIEW_LABELS[event.verdict_status] ?? event.verdict_status.replaceAll("_", " ")}</span>
+      </li>)}
+    </ol>
+  </section>;
   const bounds = preview && pose ? personBounds(pose) : null;
   return (
     <section className="panel capture-panel">
@@ -534,11 +559,13 @@ export function Capture({
       {fileName && <p className="capture-file">{fileName} · Video stays in this browser while movement is analyzed.</p>}
       {(verdictBusy || verdict) && <section className={`capture-verdict status-${shown.kind}`} aria-live="polite">
         <div className="capture-verdict-heading"><SignalIcon kind={shown.kind} size={24} />
-          <div><span className="eyebrow">VIDEO ANALYSIS</span><h3>{analysisTitle}</h3></div>
+          <div><span className="eyebrow">VIDEO ANALYSIS</span><h3>{shown.title}</h3></div>
         </div>
         {triage}
+        {alertLogSection}
       </section>}
       {preview && !verdictBusy && !verdict && triage}
+      {preview && !verdictBusy && !verdict && alertLogSection}
       {pendingCapture !== undefined && (
         <div className="modal-shade">
           <section
@@ -549,10 +576,6 @@ export function Capture({
           >
             <h2 id="consent-title">Start monitoring?</h2>
             <p>Movement measurements from {pendingCapture ? "this video" : "the camera"} will be stored with {profile.alias}'s profile.</p>
-            {config.gemini_configured && config.gemini_billed_project_confirmed && <label className="check-row">
-              <input type="checkbox" checked={sendGemini} onChange={(e) => setSendGemini(e.target.checked)} />
-              Allow Gemini to review ML-supported movement using this profile's care context
-            </label>}
             <div className="action-row">
               <button
                 className="secondary"

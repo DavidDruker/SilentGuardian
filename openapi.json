@@ -2042,6 +2042,28 @@
               }
             ],
             "title": "Action Prediction"
+          },
+          "concern": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concern"
+          },
+          "candidate_decision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Decision"
           }
         },
         "additionalProperties": false,

@@ -166,7 +166,7 @@ def test_dismissal_logged_but_continuous_long_lie_reopens(client):
     assert all(n.state not in ('pending','retry') for n in g.event(event.id).notifications)
 
 
-def test_gemini_package_includes_care_context_and_revocation_blocks_pending(guardian):
+def test_gemini_package_includes_care_context_without_profile_opt_in(guardian):
     guardian.settings.gemini_api_key = 'test'
     guardian.settings.gemini_billed_project_confirmed = True
     guardian.settings.decision_mode = 'enforce'
@@ -179,7 +179,7 @@ def test_gemini_package_includes_care_context_and_revocation_blocks_pending(guar
     for f in scenario_frames('fall', 'daniel'): guardian.ingest(f)
     with guardian.db.sessions() as s:
         pending = s.scalar(select(Event).where(Event.verdict_status == 'pending'))
-        assert pending is not None and pending.status == 'pending_review'
+        assert pending is not None and pending.status == 'open'
         package, refs = event_package(pending, [])
     encoded = json.dumps(package)
     assert all(secret not in encoded for secret in ('Daniel','contacts'))
@@ -190,10 +190,15 @@ def test_gemini_package_includes_care_context_and_revocation_blocks_pending(guar
     assert package['profile']['risk_categories'] == ['balance_support']
     guardian.save_profile(p.model_copy(update={'gemini_consent':False}))
     worker = GeminiWorker(guardian)
-    async def forbidden(*args): pytest.fail('Revoked profile must not reach external transport')
-    worker.request = forbidden
+    sent = []
+    async def review(package, frames):
+        sent.append(package)
+        return 'not valid JSON'
+    worker.request = review
     asyncio.run(worker.tick())
-    assert guardian.events()[0].verdict_status == 'privacy_blocked'
+    # Gemini needs no per-profile opt-in, and a failed review keeps the alert open.
+    event = guardian.events()[0]
+    assert sent and event.verdict_status == 'fallback' and event.status == 'open'
 
 
 def test_purge_removes_associated_data_and_does_not_reseed_consent(client):

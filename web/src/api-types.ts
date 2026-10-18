@@ -837,6 +837,10 @@ export interface components {
             action_prediction?: {
                 [key: string]: unknown;
             } | null;
+            /** Concern */
+            concern?: string | null;
+            /** Candidate Decision */
+            candidate_decision?: string | null;
         };
         /** Landmark */
         Landmark: {

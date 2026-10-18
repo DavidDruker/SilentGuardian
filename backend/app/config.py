@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     rules_service_url: str = ''
     ml_service_url: str = ''
     internal_service_token: str = 'local-internal-demo-token'
-    decision_mode: str = 'shadow'
-    gate_validated: bool = False
+    # Rules flag candidates generously; the ML decides which become alerts.
+    decision_mode: str = 'enforce'
     fall_score_threshold: float = .4
     model_timeout_seconds: float = 2
     personalization_previous_weight: float = .8
@@ -45,12 +45,10 @@ class Settings(BaseSettings):
     vapid_subject: str = 'mailto:demo@example.com'
 
     def validate_runtime(self):
-        if self.action_model_mode not in ('off', 'shadow'):
-            raise ValueError('ACTION_MODEL_MODE must be off or shadow; model alerts are not validated')
+        if self.action_model_mode not in ('off', 'on', 'shadow'):
+            raise ValueError('ACTION_MODEL_MODE must be on or off')
         if self.decision_mode not in ('shadow', 'enforce'):
             raise ValueError('DECISION_MODE must be shadow or enforce')
-        if self.decision_mode == 'enforce' and (not self.gate_validated or not self.ml_service_url):
-            raise ValueError('Enforced model gate requires GATE_VALIDATED and ML_SERVICE_URL')
         if not 0 < self.fall_score_threshold < 1 or not .1 <= self.model_timeout_seconds <= 10:
             raise ValueError('Model threshold or timeout is outside supported range')
         if not 1 <= self.action_model_threads <= 8:

@@ -20,6 +20,11 @@ from .schemas import MLRequest
 from .decision import decide, POLICY_VERSION
 
 
+# Hits of one rule within this gap are one incident. A later hit, after the person
+# has settled, is logged as a new alert with its own timestamp.
+INCIDENT_GAP_SECONDS = 5
+FLOOR_RULES = ('fall', 'prolonged_stillness')
+
 LABELS = {'fall': 'Possible fall, assessing. Please check on the person.',
           'prolonged_stillness': 'Stillness observed after a possible fall. Please check now.',
           'restricted_standing': 'Standing without a nearby helper during restricted hours.',
@@ -142,6 +147,15 @@ class Guardian:
             raise ValueError('Rules service unavailable') from exc
 
     def score_candidate(self, candidate, samples):
+        if not self.settings.ml_service_url:
+            # One-node deployment: gate with the locally loaded model.
+            model = self.actions.model
+            if model is None or candidate.quality != 'good':
+                return None
+            try:
+                return {**model.predict(samples), 'mode': 'enforce'}
+            except Exception:
+                return None
         try:
             body = MLRequest(correlation_id=candidate.id, candidate_id=candidate.id,
                              idempotency_key=candidate.idempotency_key,
@@ -156,7 +170,7 @@ class Guardian:
             result = response.json()
             if result.get('candidate_id') != candidate.id or result.get('profile_version') != candidate.profile_version:
                 return None
-            return result
+            return {**result, 'mode': 'enforce'}
         except (httpx.HTTPError, ValueError):
             return None
 
@@ -222,6 +236,9 @@ class Guardian:
             active_by_rule = {hit: event for hit, event in latest_by_rule.items()
                               if event.status in ('open', 'pending_review')}
             gate_prediction = None
+            decision = None
+            alerted = []
+            incidents = state.setdefault('incident_by_rule', {})
             for hit in dict.fromkeys(hits):
                 if hit == 'prolonged_stillness' and features.get('still_seconds', 0) >= 120:
                     floor = 3
@@ -231,12 +248,15 @@ class Guardian:
                     floor = 1
                 if p.mode == 'care' and hit == 'stumble' and p.mobility_aid != 'none':
                     floor = max(floor, 2)
-                recent = latest_by_rule.get(hit)
-                ev = active_by_rule.get(hit)
-                cooldown = recent and now-recent.updated_at < 60/frame.demo_time_scale and floor <= recent.floor_urgency
+                # Group by observation time, so an upload groups the same at any speed.
+                incident = incidents.get(hit)
+                if incident is None or frame.timestamp-incident['last'] > INCIDENT_GAP_SECONDS:
+                    incident = incidents[hit] = {'event': None, 'last': frame.timestamp}
+                incident['last'] = frame.timestamp
+                ev = s.get(Event, incident['event']) if incident['event'] else None
                 candidate_cooldown = (self.settings.decision_mode == 'enforce' and
                                       frame.timestamp-state.get('last_candidate_at_by_rule', {}).get(hit, -1e12) < 2)
-                if not ev and not cooldown and not candidate_cooldown:
+                if ev is None and not candidate_cooldown:
                     candidate_id = str(uuid4())
                     idempotency_key = hashlib.sha256(
                         f'{stream_id}:{hit}:{frame.timestamp:.6f}:{p.version}'.encode()).hexdigest()
@@ -265,6 +285,7 @@ class Guardian:
                         model_result = self.score_candidate(candidate, samples)
                         gate_prediction = model_result
                         policy = decide([hit], floor, model_result, self.settings.fall_score_threshold)
+                        decision = policy.action
                         candidate.decision, candidate.reason, candidate.model_result = policy.action, policy.reason, model_result
                         candidate_stages.append(append_stage(s, person_id=p.id, candidate_id=candidate_id, event_id=None,
                                      stage='ml_result', outcome='scored' if model_result else 'unavailable',
@@ -279,16 +300,17 @@ class Guardian:
                     keys = result['samples']
                     keyframes = [{'timestamp': x['t'], 'landmarks': x['landmarks']} for x in (keys[0], keys[len(keys)//2], keys[-1])] if keys else []
                     if policy is None or policy.action in ('supported', 'fallback_open'):
-                        review = bool(self.settings.gemini_api_key and self.settings.gemini_billed_project_confirmed
-                                      and p.gemini_consent)
-                        provisional = bool(policy and policy.action == 'supported' and review)
-                        verdict_status = ('pending' if provisional
+                        # The alert opens now with the ML-backed urgency. Gemini reviews it
+                        # afterwards and can only raise that urgency, never hold or lower it.
+                        review = bool(policy and policy.action == 'supported' and self.settings.gemini_api_key
+                                      and self.settings.gemini_billed_project_confirmed)
+                        verdict_status = ('pending' if review
                                            else 'model_fallback' if policy and policy.action == 'fallback_open'
                                            else 'model_supported_no_gemini' if policy else 'rules_only')
                         ev = Event(id=str(uuid4()), person_id=p.id, stream_id=stream_id, profile=p.model_dump(),
                                    source=frame.source, opened_at=now, observed_at=frame.timestamp, updated_at=now,
                                    rule_hits=[hit], floor_urgency=floor, urgency=floor,
-                                   status='pending_review' if provisional else 'open', summary=LABELS[hit],
+                                   status='open', summary=LABELS[hit],
                                    features={**features, 'candidate_id': candidate_id,
                                              **({'action_prediction_json': json.dumps(model_result)} if model_result else {})},
                                    keyframes=keyframes, verdict_status=verdict_status,
@@ -300,23 +322,52 @@ class Guardian:
                         candidate.event_id = ev.id
                         for stage_row in candidate_stages:
                             stage_row.event_id = ev.id
-                        if not provisional:
-                            append_stage(s, person_id=p.id, candidate_id=candidate_id, event_id=ev.id,
-                                         stage='incident_opened', outcome=policy.action if policy else 'rules_shadow',
-                                         source=frame.source, when=now, urgency=floor,
-                                         policy_version=policy.policy_version if policy else 'rules-shadow-v1')
-                            self.queue(s, ev, now)
-                elif ev:
+                        append_stage(s, person_id=p.id, candidate_id=candidate_id, event_id=ev.id,
+                                     stage='incident_opened', outcome=policy.action if policy else 'rules_shadow',
+                                     source=frame.source, when=now, urgency=floor,
+                                     policy_version=policy.policy_version if policy else 'rules-shadow-v1')
+                        self.queue(s, ev, now)
+                        incident['event'] = ev.id
+                        alerted.append(hit)
+                        if hit in FLOOR_RULES:
+                            state['floor_alert_id'] = ev.id
+                elif ev is not None and ev.status in ('open', 'pending_review'):
                     old = ev.urgency
                     ev.floor_urgency = max(ev.floor_urgency, floor)
                     ev.urgency = max(ev.urgency, floor)
                     ev.features, ev.updated_at = event_features(ev.features, features), now
                     if ev.urgency > old:
                         self.queue(s, ev, now)
+                    alerted.append(hit)
+                    if hit in FLOOR_RULES:
+                        state['floor_alert_id'] = ev.id
+            # The live concern describes this moment only. Once the person is up and
+            # settled (fall_seen clears after 3 s off the floor) there is no alert, but
+            # someone still down after a fall stays a concern, moving or not.
+            if not state.get('fall_seen'):
+                state.pop('floor_alert_id', None)
+            cached['state'] = dict(state)
+            if alerted:
+                # Persist the incident link now (not at checkpoint cadence) so a restart
+                # cannot log the same incident twice.
+                row = s.get(Stream, stream_id)
+                if row is not None:
+                    row.state = cached['state']
+            concern = None
+            if result['quality'] == 'good':
+                down = features.get('posture') == 'lying' and not features.get('in_bed') and state.get('fall_seen')
+                concern = ('on_floor' if down and state.get('floor_alert_id') else
+                           next(iter(alerted), None) or ('on_floor_watch' if down else None))
             active_events = list(active_by_rule.values())
             if result['quality'] == 'good':
+                # Keep collecting evidence only for incidents still in progress; a
+                # logged alert from earlier in the session is left as it was.
+                current = {incident['event'] for incident in incidents.values()
+                           if incident['event'] and frame.timestamp-incident['last'] <= INCIDENT_GAP_SECONDS}
+                current.add(state.get('floor_alert_id'))
                 for ev in active_events:
-                    ev.features = event_features(ev.features, features)
+                    if ev.id in current:
+                        ev.features = event_features(ev.features, features)
             active_events.sort(key=lambda ev: (ev.urgency, ev.opened_at), reverse=True)
             prediction = (gate_prediction or {'status': 'not_requested', 'mode': 'enforce'}
                            if self.settings.decision_mode == 'enforce' else
@@ -329,7 +380,7 @@ class Guardian:
                                 event_ids=[ev.id for ev in active_events],
                                 anomaly_score=baseline['score'], anchor_score=baseline['anchor_score'],
                                 baseline_contributions=baseline['contributions'], baseline_state=baseline['state'],
-                                action_prediction=prediction)
+                                action_prediction=prediction, concern=concern, candidate_decision=decision)
 
     def queue(self, s, ev, now, repeat=False):
         if ev.status != 'open' or ev.urgency < 1:
@@ -421,7 +472,8 @@ class Guardian:
             candidate_filter = Candidate.event_id == events[0].id if events else Candidate.stream_id == stream_id
             candidate = s.scalar(select(Candidate).where(candidate_filter).order_by(Candidate.observed_at.desc()).limit(1))
             return {'session_id': session_id, 'scored_windows': windows,
-                    'status': 'reviewing' if any(event.status == 'pending_review' for event in events) else
+                    'status': 'reviewing' if any(event.status == 'pending_review' or event.verdict_status == 'pending'
+                                                 for event in events) else
                               'uncertain' if not events and candidate and candidate.decision == 'hold' else 'ready',
                     'candidate_decision': candidate.decision if candidate else None,
                     'decision_reason': candidate.reason if candidate else None,

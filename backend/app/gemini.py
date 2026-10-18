@@ -120,14 +120,15 @@ class GeminiWorker:
                                      source=row.source, when=g.clock(), urgency=row.urgency)
                 return
             person = s.get(Person, ev.person_id)
-            if (not g.settings.gemini_billed_project_confirmed or not ev.profile.get('gemini_consent')
-                    or not person or not person.body.get('consent') or not person.body.get('gemini_consent')):
+            if not g.settings.gemini_billed_project_confirmed or not person or not person.body.get('consent'):
                 with g.db.lock, g.db.sessions.begin() as blocked:
                     row = blocked.get(Event, ev.id)
                     if row:
                         row.verdict_status = 'privacy_blocked'
                         if row.status == 'pending_review':
-                            row.status = 'dismissed'
+                            # Skipping review never withdraws an ML-supported alert.
+                            row.status = 'open'
+                            g.queue(blocked, row, g.clock())
                         append_stage(blocked, person_id=row.person_id, candidate_id=row.features.get('candidate_id'),
                                      event_id=row.id, stage='gemini_result', outcome='privacy_blocked',
                                      source=row.source, when=g.clock(), urgency=row.urgency)

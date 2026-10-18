@@ -198,8 +198,8 @@ def register_adjustment_routes(app, g, operator):
                 raise HTTPException(404, 'Event not found')
             package, _ = event_package(ev, [])
             return {'package': package, 'skeleton_keyframes': len(ev.keyframes),
-                    'external_send_enabled': bool(cfg.gemini_api_key and cfg.gemini_billed_project_confirmed and ev.profile.get('gemini_consent')),
-                    'note': 'Skeleton-rendered keyframes may go to Gemini only with per-profile consent and a confirmed billed project.'}
+                    'external_send_enabled': bool(cfg.gemini_api_key and cfg.gemini_billed_project_confirmed),
+                    'note': 'Skeleton-rendered keyframes of ML-supported alerts go to Gemini when a billed project is confirmed.'}
 
     @app.post('/api/demo/floor/{event_id}', dependencies=auth)
     def floor_example(event_id: str):

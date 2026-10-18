@@ -238,3 +238,15 @@
     font-size: 16px;
   }
 }
+
+/* Timestamped alerts raised during a capture; the live status shows only the present. */
+.alert-log { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.alert-log > strong { display: block; margin-bottom: 6px; font-size: 13px; }
+.alert-log ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.alert-log li { display: grid; grid-template-columns: 4.5em 1fr auto; gap: 8px; align-items: baseline; font-size: 13px; }
+.alert-log time { font-variant-numeric: tabular-nums; color: var(--slate); }
+.alert-log-meta { color: var(--slate); white-space: nowrap; }
+@media (max-width: 520px) {
+  .alert-log li { grid-template-columns: 4.5em 1fr; }
+  .alert-log-meta { grid-column: 2; white-space: normal; }
+}
