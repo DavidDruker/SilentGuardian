@@ -14,11 +14,15 @@ from PIL import Image, ImageDraw
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from .db import Audit, Candidate, Event, Person, Window
+from .db import Audit, Candidate, Event, Person, Stream, Window
 from .schemas import Verdict
 from .stages import append_stage
 
 log = logging.getLogger('guardian')
+# Uploaded videos get one Gemini review, for their most urgent alert. The review
+# waits until the video has stopped sending frames for this long.
+UPLOAD_SETTLE_SECONDS = 3
+REVIEWED = ('validated', 'fallback')
 EDGES = [(11,12),(11,23),(12,24),(23,24),(11,13),(13,15),(12,14),(14,16),(23,25),(25,27),(24,26),(26,28)]
 
 
@@ -100,9 +104,19 @@ def describe_failure(exc):
     return f'{type(exc).__name__}: {str(exc)[:200]}'
 
 
+def output_format(schema, legacy):
+    """JSON output settings. responseFormat.text.mimeType is an enum, written by its
+    constant name; the deprecated responseMimeType/responseJsonSchema pair is the
+    fallback if the API rejects responseFormat."""
+    if legacy:
+        return {'responseMimeType': 'application/json', 'responseJsonSchema': schema}
+    return {'responseFormat': {'text': {'mimeType': 'APPLICATION_JSON', 'schema': schema}}}
+
+
 class GeminiWorker:
     def __init__(self, guardian):
         self.g = guardian
+        self.legacy_format = False
 
     async def request(self, package, frames):
         cfg = self.g.settings
@@ -117,26 +131,60 @@ class GeminiWorker:
             parts += [{'text': f'frame.{i}: skeleton at {frame["timestamp"]}'},
                       {'inlineData': {'mimeType': 'image/png', 'data': skeleton_png(frame['landmarks'])}}]
         async with httpx.AsyncClient(timeout=cfg.gemini_timeout_seconds) as client:
-            response = await client.post(f'https://generativelanguage.googleapis.com/v1beta/models/{cfg.gemini_model}:generateContent',
-                                         headers={'x-goog-api-key': cfg.gemini_api_key},
-                                         json={'systemInstruction': {'parts': [{'text': system}]},
-                                               'contents': [{'role': 'user', 'parts': parts}],
-                                               'generationConfig': {
-                                                   # Gemini 3 thinks at its highest level by default, which
-                                                   # can take longer than the review timeout.
-                                                   'thinkingConfig': {'thinkingLevel': 'low'},
-                                                   'responseFormat': {'text': {
-                                                       'mimeType': 'application/json', 'schema': Verdict.model_json_schema()}}}})
+            async def send(legacy):
+                return await client.post(
+                    f'https://generativelanguage.googleapis.com/v1beta/models/{cfg.gemini_model}:generateContent',
+                    headers={'x-goog-api-key': cfg.gemini_api_key},
+                    json={'systemInstruction': {'parts': [{'text': system}]},
+                          'contents': [{'role': 'user', 'parts': parts}],
+                          'generationConfig': {
+                              # Gemini 3 thinks at its highest level by default, which can
+                              # take longer than the review timeout.
+                              'thinkingConfig': {'thinkingLevel': 'low'},
+                              **output_format(Verdict.model_json_schema(), legacy)}})
+            response = await send(self.legacy_format)
+            if (response.status_code == 400 and not self.legacy_format
+                    and 'response_format' in response.text):
+                # The request was rejected before any review happened; switch formats once.
+                self.legacy_format = True
+                response = await send(True)
             response.raise_for_status()
             return ''.join(part.get('text', '') for part in response.json()['candidates'][0]['content']['parts']
                            if not part.get('thought'))
+
+    def next_event(self, s):
+        """Most urgent pending alert that is ready for review."""
+        now = self.g.clock()
+        for ev in s.scalars(select(Event).where(Event.verdict_status == 'pending')
+                            .order_by(Event.urgency.desc(), Event.opened_at)):
+            if ev.source == 'upload':
+                stream = s.get(Stream, ev.stream_id)
+                if stream is not None and now - stream.updated_at < UPLOAD_SETTLE_SECONDS:
+                    continue  # still playing: a more urgent alert may follow
+            return ev
+        return None
+
+    def claim_upload_review(self, ev):
+        """One review per uploaded video: this (most urgent) alert, or none if used."""
+        g = self.g
+        with g.db.lock, g.db.sessions.begin() as s:
+            others = list(s.scalars(select(Event).where(Event.stream_id == ev.stream_id, Event.id != ev.id)))
+            used = any(other.verdict_status in REVIEWED for other in others)
+            skipped = [ev.id] if used else []
+            skipped += [other.id for other in others if other.verdict_status == 'pending']
+            for row in s.scalars(select(Event).where(Event.id.in_(skipped))):
+                row.verdict_status = 'not_reviewed'
+                append_stage(s, person_id=row.person_id, candidate_id=row.features.get('candidate_id'),
+                             event_id=row.id, stage='gemini_result', outcome='one_review_per_video',
+                             source=row.source, when=g.clock(), urgency=row.urgency)
+            return not used
 
     async def tick(self):
         g = self.g
         if not g.settings.gemini_api_key:
             return
         with g.db.sessions() as s:
-            ev = s.scalar(select(Event).where(Event.verdict_status == 'pending').order_by(Event.opened_at).limit(1))
+            ev = self.next_event(s)
             if ev is None:
                 return
             candidate = s.get(Candidate, ev.features.get('candidate_id')) if ev.features.get('candidate_id') else None
@@ -170,6 +218,8 @@ class GeminiWorker:
                         append_stage(blocked, person_id=row.person_id, candidate_id=row.features.get('candidate_id'),
                                      event_id=row.id, stage='gemini_result', outcome='privacy_blocked',
                                      source=row.source, when=g.clock(), urgency=row.urgency)
+                return
+            if ev.source == 'upload' and not self.claim_upload_review(ev):
                 return
             history = [{'id': e.id, 'rules': e.rule_hits, 'urgency': e.urgency} for e in s.scalars(select(Event).where(
                 Event.person_id == ev.person_id, Event.id != ev.id, Event.opened_at >= ev.opened_at-86400).limit(10))]

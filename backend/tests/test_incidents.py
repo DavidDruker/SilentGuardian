@@ -149,3 +149,37 @@ def test_safety_rule_alert_also_goes_to_gemini(guardian):
     worker.request = review
     asyncio.run(worker.tick())
     assert guardian.events()[0].verdict_status == 'validated'
+
+
+def test_one_gemini_review_per_video_for_its_most_urgent_alert(guardian):
+    from backend.app.replay import skeleton
+    from backend.app.schemas import PoseFrame
+    guardian.settings.decision_mode = 'enforce'
+    guardian.settings.gemini_api_key = 'test'
+    guardian.settings.gemini_billed_project_confirmed = True
+    guardian.score_candidate = lambda candidate, samples: {
+        'status': 'scored', 'model': 'test', 'fall_score': .9, 'staggering_score': .9, 'latency_ms': 1}
+    start = guardian.clock()
+    def frames(name, offset, duration):
+        return [f.model_copy(update={'source': 'upload', 'camera_id': 'browser-camera'})
+                for f in scenario_frames(name, 'daniel', start=start + offset, duration=duration, session_id='clip')]
+    for frame in frames('stumble', 0, 6) + frames('fall', 12, 6):  # stumble first, then a fall
+        guardian.ingest(frame)
+    alerts = {e.rule_hits[0]: e for e in guardian.events()}
+    assert {alerts['stumble'].verdict_status, alerts['fall'].verdict_status} == {'pending'}
+    worker = GeminiWorker(guardian)
+    reviewed = []
+    async def review(package, frames):
+        reviewed.append(package['rules'])
+        return json.dumps({'verdict': 'fall', 'urgency': 2, 'confidence': .8, 'summary': 'A possible fall was observed.',
+                           'evidence': [{'ref': 'ml.supported', 'detail': 'Model supported the rule'}],
+                           'recommended_actions': ['Check on the person'], 'profile_factors': []})
+    worker.request = review
+    asyncio.run(worker.tick())
+    assert reviewed == []  # the video is still sending frames
+    guardian.clock.advance(5)
+    for _ in range(3):
+        asyncio.run(worker.tick())
+    assert reviewed == [['fall']]
+    alerts = {e.rule_hits[0]: e for e in guardian.events()}
+    assert alerts['fall'].verdict_status == 'validated' and alerts['stumble'].verdict_status == 'not_reviewed'

@@ -243,7 +243,8 @@ def test_gemini_transport_validates_multipart_response(guardian, monkeypatch):
     assert validate_verdict(body, {'rule.fall'}, 2).urgency == 2
     assert received['headers']['x-goog-api-key'] == 'test'
     assert received['url'].endswith('/gemini-3.8-flash:generateContent')
-    assert received['json']['generationConfig']['responseFormat']['text']['mimeType'] == 'application/json'
+    # An enum, written by its constant name: the MIME string itself is rejected with HTTP 400.
+    assert received['json']['generationConfig']['responseFormat']['text']['mimeType'] == 'APPLICATION_JSON'
     # Gemini 3 defaults to high thinking, which can outlast the review timeout.
     assert received['json']['generationConfig']['thinkingConfig'] == {'thinkingLevel': 'low'}
 
@@ -481,3 +482,21 @@ def test_failed_review_records_the_reason():
     error = httpx.HTTPStatusError('not found', request=request, response=response)
     assert describe_failure(error) == 'Gemini API returned HTTP 404: models/x is not found'
     assert describe_failure(asyncio.TimeoutError()) == 'Timed out waiting for Gemini'
+
+
+def test_gemini_falls_back_to_legacy_json_fields_once_if_format_rejected(guardian, monkeypatch):
+    sent = []
+    async def post(self, url, **kwargs):
+        sent.append(kwargs['json']['generationConfig'])
+        if 'responseFormat' in kwargs['json']['generationConfig']:
+            return httpx.Response(400, json={'error': {'message': "Invalid value at 'generation_config.response_format.text.mime_type'"}},
+                                  request=httpx.Request('POST', url))
+        return httpx.Response(200, json={'candidates': [{'content': {'parts': [{'text': verdict_json()}]}}]},
+                              request=httpx.Request('POST', url))
+    monkeypatch.setattr(httpx.AsyncClient, 'post', post)
+    guardian.settings.gemini_api_key, guardian.settings.gemini_billed_project_confirmed = 'test', True
+    worker = GeminiWorker(guardian)
+    assert validate_verdict(asyncio.run(worker.request({}, [])), {'rule.fall'}, 2)
+    assert sent[1]['responseMimeType'] == 'application/json' and 'responseJsonSchema' in sent[1]
+    asyncio.run(worker.request({}, []))
+    assert len(sent) == 3 and 'responseFormat' not in sent[2]  # remembered: no second rejection

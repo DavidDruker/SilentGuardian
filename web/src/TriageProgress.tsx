@@ -40,7 +40,7 @@ export function TriageProgress({
     } else if (candidateDecision === "fallback_open" || event?.verdict_status === "model_fallback") {
       // Stillness on the floor: the safety rule raised it (Gemini still reviews it).
       ml = { label: "ML", detail: "Safety rule", state: "done" };
-    } else if (candidateDecision === "supported" || ["model_supported_no_gemini", "pending", "validated", "fallback", "privacy_blocked"]
+    } else if (candidateDecision === "supported" || ["model_supported_no_gemini", "pending", "validated", "fallback", "privacy_blocked", "not_reviewed"]
       .includes(event?.verdict_status ?? "")) {
       ml = { label: "ML", detail: "Supported", state: "done" };
     } else if (candidateDecision === "rejected") {
@@ -65,6 +65,8 @@ export function TriageProgress({
     gemini = { label: "Gemini", detail: "Review failed, reason in log", state: "done" };
   } else if (event?.verdict_status === "privacy_blocked") {
     gemini = { label: "Gemini", detail: "Consent blocked", state: "skipped" };
+  } else if (event?.verdict_status === "not_reviewed") {
+    gemini = { label: "Gemini", detail: "One review per video: a more urgent alert", state: "skipped" };
   } else if (["model_supported_no_gemini", "model_fallback"].includes(event?.verdict_status ?? "")) {
     gemini = { label: "Gemini", detail: geminiBlocker ?? "Not requested", state: "skipped" };
   }

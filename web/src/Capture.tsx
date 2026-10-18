@@ -43,6 +43,7 @@ const REVIEW_LABELS: Record<string, string> = {
   model_supported_no_gemini: "ML confirmed",
   model_fallback: "Safety rule",
   rules_only: "Rule alert",
+  not_reviewed: "Not sent to Gemini (one review per video)",
 };
 const clipTime = (seconds: number) => {
   const s = Math.max(0, seconds);
@@ -262,7 +263,8 @@ export function Capture({
     worker.current = null;
     let last: CaptureResult | null = null;
     try {
-      for (let i = 0; i < 20; i++) {
+      // Gemini reviews an upload once it has stopped (about 3 s), then may take up to 30 s.
+      for (let i = 0; i < 50; i++) {
         if (runId.current !== thisRun) return;
         last = await api<CaptureResult>(`/capture-result/${profile.id}/${session.current}`);
         setVerdict(last);
@@ -504,7 +506,9 @@ export function Capture({
   const shown = signals.current.get(shownKey) ?? signal;
   const geminiBlocker = !config.gemini_configured ? "No API key on server"
     : !config.gemini_billed_project_confirmed ? "Billing not confirmed on server" : undefined;
-  const latestAlert = alertLog.at(-1) ?? verdict?.event ?? null;
+  // Triage follows the most urgent alert: the one Gemini reviews for an upload.
+  const latestAlert = [...alertLog].sort((a, b) => b.urgency - a.urgency || b.observed_at - a.observed_at)[0]
+    ?? verdict?.event ?? null;
   const triage = <TriageProgress
     event={latestAlert}
     candidateDecision={verdict?.candidate_decision ?? lastDecision}

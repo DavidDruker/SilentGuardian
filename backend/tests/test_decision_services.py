@@ -152,6 +152,7 @@ def test_gemini_reviews_fall_with_separate_restricted_standing_concern(guardian)
                            'recommended_actions': ['Check on the person']})
     worker = GeminiWorker(guardian)
     worker.request = review
+    guardian.clock.advance(5)  # the upload has stopped sending frames
     asyncio.run(worker.tick())
     completed = guardian.capture_result('margaret', frames[0].session_id)
     assert completed['event']['verdict_status'] == 'validated'
