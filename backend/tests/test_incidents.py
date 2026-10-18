@@ -1,5 +1,6 @@
 """Live concern, timestamped incidents, and the ML gate around falls."""
 import asyncio
+import math
 import json
 
 from backend.app.gemini import GeminiWorker
@@ -82,3 +83,69 @@ def test_gemini_can_raise_but_never_lower_urgency(guardian):
     asyncio.run(worker.tick())
     raised = next(e for e in guardian.events() if e.id != lowered.id)
     assert raised.urgency == 3
+
+
+def test_face_down_toward_camera_is_lying_not_standing():
+    from backend.app.detector import sample
+    from backend.app.replay import skeleton
+    from backend.app.schemas import PoseFrame
+    from backend.app.seed import demo_profiles
+    profile = demo_profiles()[1]
+    def posture(angle):
+        frame = PoseFrame(session_id='s', camera_id='c', person_id=profile.id, timestamp=1,
+                          poses=[{'track_id': 'subject', 'landmarks': skeleton(angle=angle)}],
+                          monitored_track_id='subject', source='upload')
+        return sample(frame, profile)['posture']
+    # Rotated 180 degrees: head at the bottom of the image, feet at the top, torso
+    # still vertical. This is how a person lying face-down toward the camera looks.
+    assert posture(0) == 'standing'
+    assert posture(math.pi) == 'lying'
+
+
+def test_upright_then_lying_is_a_fall_even_without_image_hip_drop(guardian):
+    # A camera that follows the person down hides the hip drop; the posture change
+    # from upright to lying on the floor still marks the fall.
+    from backend.app.replay import skeleton
+    from backend.app.schemas import PoseFrame
+    gate(guardian, .9)
+    start = guardian.clock()
+    results = []
+    for i in range(90):
+        t = i / 15
+        angle = 0 if t < 2 else min(math.pi, (t - 2) / .5 * math.pi)
+        frame = PoseFrame(session_id='turn', camera_id='browser-camera', person_id='daniel', timestamp=start + t,
+                          poses=[{'track_id': 'subject', 'landmarks': skeleton(angle=angle)}],
+                          monitored_track_id='subject', source='upload')
+        results.append(guardian.ingest(frame))
+    assert any('fall' in r.rule_hits for r in results)
+    assert [e.rule_hits for e in guardian.events()] == [['fall']]
+    assert [r for r in results if r.quality == 'good'][-1].concern == 'on_floor'
+
+
+def test_restricted_hours_standing_is_logged_once_per_video(guardian):
+    gate(guardian, .9)
+    start = guardian.clock()
+    for offset in (0, 20, 40):  # Three separate stretches of standing, same video.
+        for frame in scenario_frames('normal', 'margaret', start=start + offset, duration=6, session_id='night'):
+            guardian.ingest(frame)
+    assert sum(e.rule_hits == ['restricted_standing'] for e in guardian.events()) == 1
+
+
+def test_safety_rule_alert_also_goes_to_gemini(guardian):
+    guardian.settings.decision_mode = 'enforce'
+    guardian.settings.gemini_api_key = 'test'
+    guardian.settings.gemini_billed_project_confirmed = True
+    guardian.score_candidate = lambda candidate, samples: None  # ML not running
+    run(guardian, 'fall', guardian.clock(), 'clip', 4)
+    alert = guardian.events()[0]
+    assert alert.verdict_status == 'pending' and alert.status == 'open'
+    worker = GeminiWorker(guardian)
+    async def review(package, frames):
+        assert package['model_evidence']['decision'] == 'fallback_open'
+        return json.dumps({'verdict': 'fall', 'urgency': 2, 'confidence': .7,
+                           'summary': 'A possible fall was observed.',
+                           'evidence': [{'ref': 'rule.safety_fallback', 'detail': 'Safety rule raised the alert'}],
+                           'recommended_actions': ['Check on the person'], 'profile_factors': []})
+    worker.request = review
+    asyncio.run(worker.tick())
+    assert guardian.events()[0].verdict_status == 'validated'

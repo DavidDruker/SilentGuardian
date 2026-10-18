@@ -105,8 +105,11 @@ class GeminiWorker:
             if ev is None:
                 return
             candidate = s.get(Candidate, ev.features.get('candidate_id')) if ev.features.get('candidate_id') else None
-            if (not candidate or candidate.event_id != ev.id or candidate.decision != 'supported'
-                    or not candidate.model_result or candidate.model_result.get('status') != 'scored'):
+            supported = (candidate is not None and candidate.decision == 'supported' and candidate.model_result
+                         and candidate.model_result.get('status') == 'scored')
+            # Gemini reviews alerts the ML supported, and safety-rule alerts (stillness on
+            # the floor, or no model available). Rules-only alerts never reach it.
+            if not candidate or candidate.event_id != ev.id or not (supported or candidate.decision == 'fallback_open'):
                 # Older rules-only incidents may have been left pending for Gemini.
                 # They cannot acquire a model-backed verdict retroactively.
                 with g.db.lock, g.db.sessions.begin() as blocked:
@@ -137,12 +140,12 @@ class GeminiWorker:
                 Event.person_id == ev.person_id, Event.id != ev.id, Event.opened_at >= ev.opened_at-86400).limit(10))]
             package, refs = event_package(ev, history)
             package['model_evidence'] = {
-                'decision': 'supported',
+                'decision': candidate.decision,
                 'model': candidate.model_result.get('model') if candidate.model_result else None,
                 'fall_score': candidate.model_result.get('fall_score') if candidate.model_result else None,
                 'staggering_score': candidate.model_result.get('staggering_score') if candidate.model_result else None,
             }
-            refs.add('ml.supported')
+            refs.add('ml.supported' if supported else 'rule.safety_fallback')
             windows = list(s.scalars(select(Window).where(Window.stream_id == ev.stream_id,
                 Window.ts >= datetime.fromtimestamp(ev.observed_at-10, timezone.utc),
                 Window.ts <= datetime.fromtimestamp(ev.observed_at+3, timezone.utc)).order_by(Window.ts).limit(40)))

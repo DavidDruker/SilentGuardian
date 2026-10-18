@@ -30,7 +30,8 @@ def prepare_sequence(samples):
     if len(samples) < 8:
         raise ValueError('Need at least 8 usable poses')
     ts = np.asarray([s['t'] for s in samples], dtype=np.float64)
-    if not np.isfinite(ts).all() or np.any(np.diff(ts) <= 0) or np.max(np.diff(ts)) > .25:
+    # Brief tracking dropouts (under .5 s) are bridged upstream and interpolated here.
+    if not np.isfinite(ts).all() or np.any(np.diff(ts) <= 0) or np.max(np.diff(ts)) > .5:
         raise ValueError('Sequence is discontinuous')
     if ts[-1]-ts[0] < 1.8 or ts[-1]-ts[0] > 2.01:
         raise ValueError('Need a continuous two-second observation window')
@@ -38,8 +39,11 @@ def prepare_sequence(samples):
                           for i in COCO_FROM_MEDIAPIPE] for s in samples], dtype=np.float32)
     if not np.isfinite(points).all() or np.any((points[..., 2] < 0) | (points[..., 2] > 1)):
         raise ValueError('Invalid landmarks')
-    # Require torso and most limbs to be visible; hidden limbs cannot become normal evidence.
-    if np.any(np.mean(points[:, 5:, 2] >= .6, axis=1) < .8):
+    # Most of the body must be visible across the window. A fall briefly hides joints,
+    # so judge the window as a whole; the model also receives each joint's visibility
+    # as an input channel, so low-confidence joints are already down-weighted.
+    visible = np.mean(points[:, 5:, 2] >= .6, axis=1)
+    if visible.mean() < .7 or visible.min() < .5:
         raise ValueError('Insufficient visible body joints')
     points[..., :2] = points[..., :2]*2-1
     target = np.linspace(ts[0], ts[-1], 100)

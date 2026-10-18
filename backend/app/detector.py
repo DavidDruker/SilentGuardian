@@ -14,6 +14,11 @@ BRIDGE_SECONDS = 3
 # Must stay below the .75 s window-continuity limit in evaluate().
 BRIEF_DROPOUT_SECONDS = .5
 FALL_HIP_DROP_TORSO_RATIO = .35
+# Upright, then lying on the floor this soon after, is a fall even when the image
+# shows little hip drop (a handheld camera following the person cancels it out).
+FALL_TRANSITION_SECONDS = 2.5
+# At least 7 of the 9 key joints. Wrists and ankles are often hidden mid-fall.
+MIN_KEY_VISIBILITY = 7/9
 
 
 def midpoint(points, a, b):
@@ -26,14 +31,22 @@ def quiet_hours(profile, timestamp):
     return a <= hour < b if a < b else hour >= a or hour < b
 
 
-def classify_posture(angle, height, width, torso, previous=None):
+def classify_posture(angle, height, width, torso, previous=None, inverted=False, head_down=False):
+    # Shoulders below the hips with the feet above them is someone lying along the
+    # camera's line of sight (e.g. face-down toward it). The torso then looks
+    # vertical, so the angle test alone would call them standing.
+    if inverted:
+        return 'lying'
     # Hysteresis: keep the previous posture until the reading clearly leaves it, so a
     # body near a threshold does not flicker between postures (and reset timers).
     if previous == 'lying' and angle > 50 and width > height * .8:
         return 'lying'
-    if previous == 'standing' and angle < 42 and height / torso > 2.1:
+    if previous == 'standing' and not head_down and angle < 42 and height / torso > 2.1:
         return 'standing'
-    return 'lying' if angle > 60 and width > height * .9 else 'standing' if angle < 35 and height / torso > 2.3 else 'sitting'
+    if angle > 60 and width > height * .9:
+        return 'lying'
+    # Nobody stands with their head below their hips; bent double counts as sitting.
+    return 'standing' if not head_down and angle < 35 and height / torso > 2.3 else 'sitting'
 
 
 def sample(frame: PoseFrame, profile: Profile, previous_posture=None):
@@ -51,7 +64,7 @@ def sample(frame: PoseFrame, profile: Profile, previous_posture=None):
         return None
     points = selected.landmarks
     quality = sum(points[k].visibility >= .6 for k in KEYS) / len(KEYS)
-    if quality < .8:
+    if quality < MIN_KEY_VISIBILITY - 1e-9:
         return None
     hip = midpoint(points, 23, 24)
     shoulder = midpoint(points, 11, 12)
@@ -61,7 +74,10 @@ def sample(frame: PoseFrame, profile: Profile, previous_posture=None):
     angle = math.degrees(math.atan2(abs(hip[0] - shoulder[0]), abs(hip[1] - shoulder[1])))
     height = max(p.y for p in points) - min(p.y for p in points)
     width = max(p.x for p in points) - min(p.x for p in points)
-    posture = classify_posture(angle, height, width, torso, previous_posture)
+    ankle_y = (points[27].y + points[28].y) / 2
+    head_down = shoulder[1] > hip[1] + .15 * torso
+    posture = classify_posture(angle, height, width, torso, previous_posture,
+                               inverted=head_down and ankle_y < hip[1], head_down=head_down)
     zone = profile.bed_zone
     in_bed = bool(zone and zone.x1 <= hip[0] <= zone.x2 and zone.y1 <= hip[1] <= zone.y2)
     helper = False
@@ -129,7 +145,11 @@ def evaluate(frame: PoseFrame, profile: Profile, state: dict):
     wrist_speed = max((max(math.dist(a['wrist'][i], b['wrist'][i]) for i in (0, 1)) / scale / dt for a, b, dt in steps), default=0)
     ankle_change = max((abs((b['ankles'][0]-b['ankles'][1])-(a['ankles'][0]-a['ankles'][1])) / scale / dt for a, b, dt in steps), default=0)
     hits = []
-    if drop > FALL_HIP_DROP_TORSO_RATIO and current['posture'] == 'lying' and not current['in_bed']:
+    if current['posture'] == 'standing':
+        state['upright_at'] = t
+    recently_upright = state.get('upright_at') is not None and t - state['upright_at'] <= FALL_TRANSITION_SECONDS
+    if (current['posture'] == 'lying' and not current['in_bed']
+            and (drop > FALL_HIP_DROP_TORSO_RATIO or recently_upright)):
         hits.append('fall')
         state['fall_seen'] = True
     on_floor = current['posture'] == 'lying' and not current['in_bed']

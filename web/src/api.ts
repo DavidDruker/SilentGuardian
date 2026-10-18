@@ -13,6 +13,8 @@ export type AppConfig = {
   calls_configured: boolean;
   database: string;
   tiger_budget_limit: number;
+  ml_state?: string;
+  decision_mode?: string;
 };
 
 export async function api<T>(

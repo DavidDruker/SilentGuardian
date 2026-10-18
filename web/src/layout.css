@@ -250,3 +250,9 @@
   .alert-log li { grid-template-columns: 4.5em 1fr; }
   .alert-log-meta { grid-column: 2; white-space: normal; }
 }
+
+/* Compact capture stage: the clip should not crowd out the live status and alert log. */
+.mvp-workspace .camera-stage {
+  max-width: 640px;
+  max-height: 360px;
+}

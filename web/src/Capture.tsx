@@ -114,6 +114,7 @@ export function Capture({
   const [concern, setConcern] = useState<string | null>(null);
   const [alertLog, setAlertLog] = useState<GuardianEvent[]>([]);
   const [lastDecision, setLastDecision] = useState<string | null>(null);
+  const [mlState, setMlState] = useState(config.ml_state ?? "");
   const video = useRef<HTMLVideoElement>(null),
     worker = useRef<Worker | null>(null),
     media = useRef<MediaStream | null>(null);
@@ -288,6 +289,8 @@ export function Capture({
     stop();
     session.current = uid();
     setResult(null);
+    // The model loads after the server starts; check its state for this capture.
+    void api<AppConfig>("/config").then((fresh) => setMlState(fresh.ml_state ?? "")).catch(() => undefined);
     try {
       setStatus("Preparing video analysis…");
       setSource(file ? "Uploaded video" : "Live camera");
@@ -467,6 +470,7 @@ export function Capture({
     candidateDecision={verdict?.candidate_decision ?? lastDecision}
     prediction={lastScored.current ?? result?.action_prediction}
     geminiBlocker={geminiBlocker}
+    mlDown={Boolean(mlState) && mlState !== "ready"}
     ruleHits={result?.rule_hits}
     hasIncident={logged > 0}
     quality={result?.quality}
@@ -499,7 +503,8 @@ export function Capture({
       </div>
       <div className="camera-stage" style={videoAspect ? {
         aspectRatio: String(videoAspect),
-        width: videoAspect < 1.5 ? `min(100%, ${Math.round(560 * videoAspect)}px)` : undefined,
+        // Keep the clip compact (360 px tall at most) so the status and log stay in view.
+        width: `min(100%, ${Math.round(360 * videoAspect)}px)`,
       } : undefined}>
         <video
           ref={video}

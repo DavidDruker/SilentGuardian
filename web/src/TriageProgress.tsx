@@ -12,6 +12,7 @@ export function TriageProgress({
   quality,
   scoredWindows = 0,
   geminiBlocker,
+  mlDown = false,
 }: {
   event?: GuardianEvent | null;
   candidateDecision?: string | null;
@@ -21,6 +22,7 @@ export function TriageProgress({
   quality?: string;
   scoredWindows?: number;
   geminiBlocker?: string;
+  mlDown?: boolean;
 }) {
   const action = prediction ?? event?.action_prediction;
   const hasRuleHit = Boolean(event || candidateDecision || ruleHits.length || hasIncident);
@@ -32,17 +34,19 @@ export function TriageProgress({
 
   let ml: Stage = { label: "ML", detail: "Not used", state: "skipped" };
   if (hasRuleHit) {
-    // Gemini only ever receives ML-supported incidents, so any Gemini state implies support.
-    if (candidateDecision === "supported" || ["model_supported_no_gemini", "pending", "validated", "fallback", "privacy_blocked"]
+    if (mlDown) {
+      // Without the model only the fall and stillness safety rules can raise alerts.
+      ml = { label: "ML", detail: "Not running on server", state: "skipped" };
+    } else if (candidateDecision === "fallback_open" || event?.verdict_status === "model_fallback") {
+      // Stillness on the floor: the safety rule raised it (Gemini still reviews it).
+      ml = { label: "ML", detail: "Safety rule", state: "done" };
+    } else if (candidateDecision === "supported" || ["model_supported_no_gemini", "pending", "validated", "fallback", "privacy_blocked"]
       .includes(event?.verdict_status ?? "")) {
       ml = { label: "ML", detail: "Supported", state: "done" };
     } else if (candidateDecision === "rejected") {
       ml = { label: "ML", detail: "Not supported", state: "done" };
     } else if (candidateDecision === "hold") {
       ml = { label: "ML", detail: "Held for review", state: "done" };
-    } else if (candidateDecision === "fallback_open" || event?.verdict_status === "model_fallback") {
-      // Stillness on the floor, or no model available: the safety rule raised it.
-      ml = { label: "ML", detail: "Safety rule", state: "done" };
     } else if (action?.status === "scored" && action?.mode === "shadow") {
       ml = { label: "ML", detail: "Shadow only", state: "skipped" };
     } else if (action?.status === "pending") {
@@ -61,7 +65,7 @@ export function TriageProgress({
     gemini = { label: "Gemini", detail: "Review unavailable", state: "done" };
   } else if (event?.verdict_status === "privacy_blocked") {
     gemini = { label: "Gemini", detail: "Consent blocked", state: "skipped" };
-  } else if (event?.verdict_status === "model_supported_no_gemini") {
+  } else if (["model_supported_no_gemini", "model_fallback"].includes(event?.verdict_status ?? "")) {
     gemini = { label: "Gemini", detail: geminiBlocker ?? "Not requested", state: "skipped" };
   }
 

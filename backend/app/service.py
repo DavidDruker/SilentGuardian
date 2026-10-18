@@ -24,6 +24,9 @@ from .decision import decide, POLICY_VERSION
 # has settled, is logged as a new alert with its own timestamp.
 INCIDENT_GAP_SECONDS = 5
 FLOOR_RULES = ('fall', 'prolonged_stillness')
+# Contextual rules that keep firing for as long as the situation lasts; one log
+# entry per capture session is enough.
+ONCE_PER_SESSION = ('restricted_standing',)
 
 LABELS = {'fall': 'Possible fall, assessing. Please check on the person.',
           'prolonged_stillness': 'Stillness observed after a possible fall. Please check now.',
@@ -256,7 +259,8 @@ class Guardian:
                 ev = s.get(Event, incident['event']) if incident['event'] else None
                 candidate_cooldown = (self.settings.decision_mode == 'enforce' and
                                       frame.timestamp-state.get('last_candidate_at_by_rule', {}).get(hit, -1e12) < 2)
-                if ev is None and not candidate_cooldown:
+                already_logged = hit in ONCE_PER_SESSION and hit in state.get('logged_once', [])
+                if ev is None and not candidate_cooldown and not already_logged:
                     candidate_id = str(uuid4())
                     idempotency_key = hashlib.sha256(
                         f'{stream_id}:{hit}:{frame.timestamp:.6f}:{p.version}'.encode()).hexdigest()
@@ -300,10 +304,11 @@ class Guardian:
                     keys = result['samples']
                     keyframes = [{'timestamp': x['t'], 'landmarks': x['landmarks']} for x in (keys[0], keys[len(keys)//2], keys[-1])] if keys else []
                     if policy is None or policy.action in ('supported', 'fallback_open'):
-                        # The alert opens now with the ML-backed urgency. Gemini reviews it
-                        # afterwards and can only raise that urgency, never hold or lower it.
-                        review = bool(policy and policy.action == 'supported' and self.settings.gemini_api_key
-                                      and self.settings.gemini_billed_project_confirmed)
+                        # The alert opens now with the ML-backed urgency. Gemini reviews every
+                        # ML-supported or safety-rule alert afterwards and can only raise that
+                        # urgency, never hold or lower it.
+                        review = bool(policy and policy.action in ('supported', 'fallback_open')
+                                      and self.settings.gemini_api_key and self.settings.gemini_billed_project_confirmed)
                         verdict_status = ('pending' if review
                                            else 'model_fallback' if policy and policy.action == 'fallback_open'
                                            else 'model_supported_no_gemini' if policy else 'rules_only')
@@ -329,6 +334,8 @@ class Guardian:
                         self.queue(s, ev, now)
                         incident['event'] = ev.id
                         alerted.append(hit)
+                        if hit in ONCE_PER_SESSION:
+                            state.setdefault('logged_once', []).append(hit)
                         if hit in FLOOR_RULES:
                             state['floor_alert_id'] = ev.id
                 elif ev is not None and ev.status in ('open', 'pending_review'):
