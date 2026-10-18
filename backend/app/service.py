@@ -276,9 +276,9 @@ class Guardian:
                         review = bool(self.settings.gemini_api_key and self.settings.gemini_billed_project_confirmed
                                       and p.gemini_consent)
                         provisional = bool(policy and policy.action == 'supported' and review)
-                        verdict_status = ('pending' if provisional or (policy is None and self.settings.gemini_api_key)
-                                          else 'model_fallback' if policy and policy.action == 'fallback_open'
-                                          else 'model_supported_no_gemini' if policy else 'rules_only')
+                        verdict_status = ('pending' if provisional
+                                           else 'model_fallback' if policy and policy.action == 'fallback_open'
+                                           else 'model_supported_no_gemini' if policy else 'rules_only')
                         ev = Event(id=str(uuid4()), person_id=p.id, stream_id=stream_id, profile=p.model_dump(),
                                    source=frame.source, opened_at=now, observed_at=frame.timestamp, updated_at=now,
                                    rule_hits=[hit], floor_urgency=floor, urgency=floor,

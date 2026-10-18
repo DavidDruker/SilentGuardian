@@ -124,12 +124,12 @@ def test_worker_idempotence_and_ack_during_escalation(guardian,clock):
     assert all(n.state in ('simulated','cancelled') for n in done.notifications)
 
 
-def test_fall_alert_queued_before_ai(guardian):
+def test_fall_rule_alert_does_not_claim_gemini_review(guardian):
     guardian.settings.gemini_api_key='not-a-real-key'
     out=run(guardian,'fall')
     ev=guardian.events()[0]
     assert ev.urgency>=2 and ev.notifications
-    assert ev.verdict_status=='pending'
+    assert ev.verdict_status=='rules_only'
     assert ev.features['hip_drop'] > .5
     assert ev.features['trunk_angle'] > 60
 
@@ -231,6 +231,11 @@ def test_gemini_transport_validates_multipart_response(guardian, monkeypatch):
 def test_gemini_failure_preserves_alert(guardian,failure):
     guardian.settings.gemini_api_key='test';guardian.settings.gemini_timeout_seconds=.01
     guardian.settings.gemini_billed_project_confirmed = True
+    guardian.settings.decision_mode = 'enforce'
+    guardian.score_candidate = lambda candidate, samples: {
+        'status': 'scored', 'model': 'test', 'fall_score': .9,
+        'staggering_score': .01, 'latency_ms': 1,
+    }
     p = next(p for p in guardian.profiles() if p.id == 'daniel')
     guardian.save_profile(p.model_copy(update={'gemini_consent': True}))
     run(guardian,'fall')

@@ -1,8 +1,12 @@
+import asyncio
+import json
+
 from sqlalchemy import select
 from fastapi.testclient import TestClient
 
-from backend.app.db import Candidate, EventStage
+from backend.app.db import Candidate, Event, EventStage
 from backend.app.decision import decide
+from backend.app.gemini import GeminiWorker
 from backend.app.replay import scenario_frames
 from backend.app.rules_api import app as rules_app
 from backend.app.detector import sample
@@ -56,6 +60,50 @@ def test_enforced_policy_preserves_urgent_model_outage_fallback(guardian):
 def test_policy_uses_uncertainty_for_unrelated_action_class():
     assert decide(['bed_exit'], 2, {'status': 'scored', 'fall_score': 0, 'staggering_score': 0}, .5).action == 'hold'
     assert decide(['prolonged_stillness'], 2, None, .5).action == 'fallback_open'
+    assert decide(['fall'], 3, {'status': 'scored', 'fall_score': .9}, .5).action == 'supported'
+
+
+def test_gemini_receives_context_only_after_ml_support(guardian):
+    guardian.settings.decision_mode = 'enforce'
+    guardian.settings.gemini_api_key = 'test'
+    guardian.settings.gemini_billed_project_confirmed = True
+    profile = next(p for p in guardian.profiles() if p.id == 'daniel')
+    guardian.save_profile(profile.model_copy(update={'gemini_consent': True}))
+    guardian.score_candidate = lambda candidate, samples: {
+        'status': 'scored', 'model': 'test', 'fall_score': .9,
+        'staggering_score': .01, 'latency_ms': 1,
+    }
+    for frame in scenario_frames('fall', 'daniel'):
+        guardian.ingest(frame)
+    assert guardian.events() == []  # Supported candidate waits for contextual review.
+    captured = {}
+    async def review(package, frames):
+        captured.update(package)
+        return json.dumps({'verdict': 'fall', 'urgency': 2, 'confidence': .8,
+                           'summary': 'A possible fall was observed.',
+                           'evidence': [{'ref': 'ml.supported', 'detail': 'Model supported the rule'}],
+                           'recommended_actions': ['Check on the person'], 'profile_factors': []})
+    worker = GeminiWorker(guardian)
+    worker.request = review
+    asyncio.run(worker.tick())
+    assert captured['model_evidence']['decision'] == 'supported'
+    assert captured['profile']['conditions'] == profile.conditions
+    assert guardian.events()[0].verdict_status == 'validated'
+
+
+def test_legacy_rules_only_pending_event_cannot_reach_gemini(guardian):
+    guardian.settings.gemini_api_key = 'test'
+    for frame in scenario_frames('fall', 'daniel'):
+        guardian.ingest(frame)
+    event = guardian.events()[0]
+    with guardian.db.sessions.begin() as session:
+        session.get(Event, event.id).verdict_status = 'pending'
+    worker = GeminiWorker(guardian)
+    async def forbidden(*args):
+        raise AssertionError('Rules-only evidence must not reach Gemini')
+    worker.request = forbidden
+    asyncio.run(worker.tick())
+    assert guardian.event(event.id).verdict_status == 'rules_only'
 
 
 def test_ml_service_auth_quality_and_bounded_inference(guardian, monkeypatch):

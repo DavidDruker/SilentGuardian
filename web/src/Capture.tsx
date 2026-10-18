@@ -400,6 +400,14 @@ export function Capture({
     quality={result?.quality}
     scoredWindows={verdict?.scored_windows}
   />;
+  const analyzedEvent = verdict?.event;
+  const analysisTitle = alertCount > 1 ? `${alertCount} alerts recorded`
+    : analyzedEvent?.verdict_status === "validated" ? analyzedEvent.summary
+    : analyzedEvent?.verdict_status === "pending" ? "Gemini review in progress"
+    : analyzedEvent?.verdict_status === "rules_only" ? "Rule alert recorded"
+    : analyzedEvent?.verdict_status === "model_fallback" ? "Rule alert · ML unavailable"
+    : analyzedEvent?.verdict_status === "model_supported_no_gemini" ? "ML-supported alert"
+    : signal.title;
   const bounds = preview && poses.length === 1 ? personBounds(poses[0]) : null;
   return (
     <section className="panel capture-panel">
@@ -474,7 +482,7 @@ export function Capture({
       {fileName && <p className="capture-file">{fileName} · Video stays in this browser while movement is analyzed.</p>}
       {(verdictBusy || verdict) && <section className={`capture-verdict status-${signal.kind}`} aria-live="polite">
         <div className="capture-verdict-heading"><SignalIcon kind={signal.kind} size={24} />
-          <div><span className="eyebrow">VIDEO ANALYSIS</span><h3>{alertCount > 1 ? `${alertCount} alerts detected` : verdict?.event?.summary || signal.title}</h3></div>
+          <div><span className="eyebrow">VIDEO ANALYSIS</span><h3>{analysisTitle}</h3></div>
         </div>
         {triage}
       </section>}
@@ -491,7 +499,7 @@ export function Capture({
             <p>Movement measurements from {pendingCapture ? "this video" : "the camera"} will be stored with {profile.alias}'s profile.</p>
             {config.gemini_configured && config.gemini_billed_project_confirmed && <label className="check-row">
               <input type="checkbox" checked={sendGemini} onChange={(e) => setSendGemini(e.target.checked)} />
-              Allow Gemini to review flagged movement using this profile's care context
+              Allow Gemini to review ML-supported movement using this profile's care context
             </label>}
             <div className="action-row">
               <button

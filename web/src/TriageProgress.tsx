@@ -39,9 +39,9 @@ export function TriageProgress({
     } else if (candidateDecision === "fallback_open" || event?.verdict_status === "model_fallback") {
       ml = { label: "ML", detail: "Unavailable", state: "done" };
     } else if (action?.status === "scored") {
-      ml = { label: "ML", detail: "Shadow scored", state: "done" };
+      ml = { label: "ML", detail: "Shadow only", state: "skipped" };
     } else if (action?.status === "pending") {
-      ml = { label: "ML", detail: "Shadow running", state: "active" };
+      ml = { label: "ML", detail: "Shadow running", state: "skipped" };
     } else if (candidateDecision === "shadow" || action?.mode === "shadow") {
       ml = { label: "ML", detail: "Shadow only", state: "skipped" };
     }

@@ -12,8 +12,6 @@ class Decision:
 
 
 def decide(rule_hits, floor, model_result, threshold):
-    if 'prolonged_stillness' in rule_hits or floor >= 3:
-        return Decision('fallback_open', 'urgent_rule_evidence')
     if model_result is None or model_result.get('status') != 'scored':
         return Decision('fallback_open' if floor >= 2 else 'hold',
                         'model_unavailable_or_uncertain')
@@ -22,6 +20,8 @@ def decide(rule_hits, floor, model_result, threshold):
                      and model_result.get('staggering_score', 0) >= threshold))
     if supported:
         return Decision('supported', 'model_supports_rule')
+    if 'prolonged_stillness' in rule_hits or floor >= 3:
+        return Decision('fallback_open', 'urgent_rule_evidence')
     if any(hit in rule_hits for hit in ('fall', 'stumble', 'sway')):
         return Decision('rejected', 'model_did_not_support_rule')
     return Decision('hold', 'model_has_no_matching_action_class')

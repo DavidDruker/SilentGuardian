@@ -11,7 +11,7 @@ import httpx
 from PIL import Image, ImageDraw
 from sqlalchemy import select
 
-from .db import Audit, Event, Person, Window
+from .db import Audit, Candidate, Event, Person, Window
 from .schemas import Verdict
 from .stages import append_stage
 
@@ -104,6 +104,21 @@ class GeminiWorker:
             ev = s.scalar(select(Event).where(Event.verdict_status == 'pending').order_by(Event.opened_at).limit(1))
             if ev is None:
                 return
+            candidate = s.get(Candidate, ev.features.get('candidate_id')) if ev.features.get('candidate_id') else None
+            if (not candidate or candidate.event_id != ev.id or candidate.decision != 'supported'
+                    or not candidate.model_result or candidate.model_result.get('status') != 'scored'):
+                # Older rules-only incidents may have been left pending for Gemini.
+                # They cannot acquire a model-backed verdict retroactively.
+                with g.db.lock, g.db.sessions.begin() as blocked:
+                    row = blocked.get(Event, ev.id)
+                    if row and row.verdict_status == 'pending':
+                        row.verdict_status = 'rules_only'
+                        if row.status == 'pending_review':
+                            row.status = 'dismissed'
+                        append_stage(blocked, person_id=row.person_id, candidate_id=row.features.get('candidate_id'),
+                                     event_id=row.id, stage='gemini_result', outcome='skipped_no_ml_support',
+                                     source=row.source, when=g.clock(), urgency=row.urgency)
+                return
             person = s.get(Person, ev.person_id)
             if (not g.settings.gemini_billed_project_confirmed or not ev.profile.get('gemini_consent')
                     or not person or not person.body.get('consent') or not person.body.get('gemini_consent')):
@@ -120,6 +135,13 @@ class GeminiWorker:
             history = [{'id': e.id, 'rules': e.rule_hits, 'urgency': e.urgency} for e in s.scalars(select(Event).where(
                 Event.person_id == ev.person_id, Event.id != ev.id, Event.opened_at >= ev.opened_at-86400).limit(10))]
             package, refs = event_package(ev, history)
+            package['model_evidence'] = {
+                'decision': 'supported',
+                'model': candidate.model_result.get('model') if candidate.model_result else None,
+                'fall_score': candidate.model_result.get('fall_score') if candidate.model_result else None,
+                'staggering_score': candidate.model_result.get('staggering_score') if candidate.model_result else None,
+            }
+            refs.add('ml.supported')
             windows = list(s.scalars(select(Window).where(Window.stream_id == ev.stream_id,
                 Window.ts >= datetime.fromtimestamp(ev.observed_at-10, timezone.utc),
                 Window.ts <= datetime.fromtimestamp(ev.observed_at+3, timezone.utc)).order_by(Window.ts).limit(40)))
