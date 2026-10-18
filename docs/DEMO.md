@@ -5,14 +5,14 @@ Use synthetic profiles and consenting team members. The supplied skeleton scenar
 ## Four-minute walkthrough
 
 1. Create or select a consenting Care or Personal profile, then choose **Upload demo video**. Use the approved pre-recorded clip of a person walking, arching their back, and falling. No demo clip is bundled in this repository.
-2. Accept movement monitoring consent. Playback waits for MediaPipe to load, overlays the skeleton, and automatically selects the one visible person. If multiple people appear, select the intended person before playback resumes.
+2. Accept movement monitoring consent. Playback waits for MediaPipe to load and overlays the one visible person's skeleton. Frames with multiple people are marked uncertain until only one remains.
 3. At the end of playback, show the session-scoped verdict. The UI distinguishes an alert, a held/uncertain candidate, no alert, and no usable pose. A rules-only or model fallback result is labelled as such; do not present it as a validated ML/Gemini verdict.
 4. Open **Activity** to show the incident opening in the seven-day heat map and the ordered candidate, ML, Gemini, notification, and acknowledgement stages. A coverage dot means usable pose data was sent during that hour. Select the cell to filter the incident timeline.
 5. Open **Alerts** and acknowledge any real incident. Pending sends are cancelled. Use the profile's consent settings to ensure Gemini is enabled only when the billed project and the person's consent are available.
 
 ## Real camera and staged clips
 
-**Start camera** first presents consent and decline controls, then runs MediaPipe in a Web Worker. Pixels outside the monitored area are masked before inference and out-of-area people are excluded from helper detection. Select the numbered person to enroll the monitored pose. Nearby helpers are considered only when their landmarks are visible. Identity uncertainty or occlusion requires selection again. A nearby helper is a heuristic, not proof of assistance. **Stop capture** stops camera tracks and the socket.
+**Start camera** first presents consent and decline controls, then runs MediaPipe in a Web Worker. The full frame is checked for people. Monitoring starts automatically with exactly one visible person; zero or multiple visible people make scoring uncertain until one person is visible again. The video shows one skeleton and tracking box, while the status and verdict appear below it. **Stop capture** stops camera tracks and the socket.
 
 **Upload demo video** runs a video file through the same MediaPipe worker and authenticated pose socket. The file stays on the capture device. This path supports staged team clips once they are recorded. No team video has been recorded by the agent. Use a pre-approved staged clip; do not perform dangerous falls for the demo.
 

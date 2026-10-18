@@ -45,7 +45,7 @@ MediaPipe's 33 landmarks map to COCO's 17 joints using indices
 `0,2,5,7,8,11,12,13,14,15,16,23,24,25,26,27,28`. Each joint contains normalized
 x/y and visibility; MediaPipe z is **not** the confidence channel. Coordinates
 use upstream PreNormalize2D: `2*x-1` and `2*y-1`. The second person is zero-padded
-as in upstream FormatGCNInput. Only the selected person is classified.
+as in upstream FormatGCNInput. Classification runs only when one person is visible.
 
 The online adapter interpolates approximately two seconds to 100 time positions.
 It requires eight or more poses spanning at least 1.8 seconds, no gap over 250 ms,

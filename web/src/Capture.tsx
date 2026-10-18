@@ -20,11 +20,6 @@ import {
 } from "./api";
 import { Skeleton } from "./Skeleton";
 import { TriageProgress } from "./TriageProgress";
-const center = (p: Landmark[]) => ({
-  x: (p[23].x + p[24].x) / 2,
-  y: (p[23].y + p[24].y) / 2,
-});
-
 function personBounds(landmarks: Landmark[]) {
   const visible = landmarks.filter((point) =>
     point.visibility >= 0.35 && Number.isFinite(point.x) && Number.isFinite(point.y) &&
@@ -50,6 +45,7 @@ type CaptureResult = {
   status: "reviewing" | "uncertain" | "ready";
   scored_windows: number;
   event: GuardianEvent | null;
+  events: GuardianEvent[];
   candidate_decision: string | null;
   decision_reason: string | null;
 };
@@ -68,8 +64,7 @@ export function Capture({
   const [poses, setPoses] = useState<Landmark[][]>([]),
     [running, setRunning] = useState(false),
     [preview, setPreview] = useState(false);
-  const [selected, setSelected] = useState(-1),
-    [status, setStatus] = useState("Camera is paused"),
+  const [status, setStatus] = useState("Camera is paused"),
     [result, setResult] = useState<IngestResult | null>(null);
   const [source, setSource] = useState("");
   const [fileName, setFileName] = useState("");
@@ -77,17 +72,12 @@ export function Capture({
   const [verdict, setVerdict] = useState<CaptureResult | null>(null);
   const [verdictBusy, setVerdictBusy] = useState(false);
   const [activeAlert, setActiveAlert] = useState(false);
+  const [activeEventIds, setActiveEventIds] = useState<string[]>([]);
   const [activeEventId, setActiveEventId] = useState<string | null>(null);
   const [activeEvent, setActiveEvent] = useState<GuardianEvent | null>(null);
   const video = useRef<HTMLVideoElement>(null),
     worker = useRef<Worker | null>(null),
     media = useRef<MediaStream | null>(null);
-  const [region] = useState({
-    x1: 0.15,
-    y1: 0.05,
-    x2: 0.85,
-    y2: 0.98,
-  });
   const [pendingCapture, setPendingCapture] = useState<File | null | undefined>(
     undefined,
   );
@@ -97,9 +87,8 @@ export function Capture({
     busy = useRef(false),
     raf = useRef(0),
     sock = useRef<ReturnType<typeof connectPose> | null>(null);
-  const poseRef = useRef<Landmark[][]>([]),
-    chosen = useRef<{ x: number; y: number } | null>(null),
-    lost = useRef(false);
+  const lost = useRef(false);
+  const seenEventIds = useRef(new Set<string>());
   const session = useRef(uid());
   const recordedFrames = useRef<PoseFrame[]>([]);
   const selectedRef = useRef(false),
@@ -127,12 +116,10 @@ export function Capture({
     }
     if (localUrl.current) URL.revokeObjectURL(localUrl.current);
     localUrl.current = "";
-    chosen.current = null;
     lost.current = false;
     busy.current = false;
     setRunning(false);
     setPreview(false);
-    setSelected(-1);
     setPoses([]);
     setResult(null);
     setSource("");
@@ -140,6 +127,8 @@ export function Capture({
     setVerdict(null);
     setVerdictBusy(false);
     setActiveAlert(false);
+    setActiveEventIds([]);
+    seenEventIds.current.clear();
     setActiveEventId(null);
     setActiveEvent(null);
     setVideoAspect(0);
@@ -181,20 +170,24 @@ export function Capture({
     sock.current?.close();
     sock.current = connectPose((r) => {
       if (r.quality !== "buffering") setResult(r);
-      if (r.event_id) { setActiveAlert(true); setActiveEventId(r.event_id); onEvent(); }
+      const ids = r.event_ids?.length ? r.event_ids : r.event_id ? [r.event_id] : [];
+      if (ids.length) {
+        setActiveAlert(true);
+        setActiveEventIds(ids);
+        setActiveEventId(r.event_id ?? ids[0]);
+        if (ids.some((id) => !seenEventIds.current.has(id))) onEvent();
+        ids.forEach((id) => seenEventIds.current.add(id));
+      }
     }, setStatus);
   };
-  const choose = (index: number) => {
-    if (!poseRef.current[index]) return;
+  const choose = () => {
     selectedRef.current = true;
-    chosen.current = center(poseRef.current[index]);
     lost.current = false;
-    setSelected(index);
     session.current = uid();
     recordedFrames.current = [];
     socket();
     setRunning(true);
-    setStatus("Tracking selected person");
+    setStatus("Tracking one person");
   };
   const finishUpload = async () => {
     if (sourceRef.current !== "upload" || finishing.current) return;
@@ -299,36 +292,13 @@ export function Capture({
             visibility: l.visibility ?? 0,
           })),
         );
-        poseRef.current = detected;
         setPoses(detected);
-        if (sourceRef.current === "upload" && !selectedRef.current && detected.length === 1) {
-          choose(0);
-        } else if (sourceRef.current === "upload" && !selectedRef.current && detected.length > 1) {
-          element.pause();
-          setStatus("Select the person to monitor, then video will resume");
-        }
-        if (!chosen.current || !sock.current) return;
-        const distances = detected
-          .map((p, i) => ({
-            i,
-            d: Math.hypot(
-              center(p).x - chosen.current!.x,
-              center(p).y - chosen.current!.y,
-            ),
-          }))
-          .sort((a, b) => a.d - b.d);
-        const index = distances[0]?.i ?? -1;
-        const ambiguous =
-          index < 0 ||
-          distances[0].d > 0.18 ||
-          (distances.length > 1 && distances[1].d - distances[0].d < 0.06);
-        if (ambiguous) lost.current = true;
-        if (lost.current)
-          setStatus("Identity uncertain — select the person again");
-        else {
-          chosen.current = center(detected[index]);
-          setSelected(index);
-        }
+        if (detected.length === 1 && !selectedRef.current) choose();
+        lost.current = detected.length !== 1;
+        if (detected.length > 1) setStatus("More than one person in view");
+        else if (detected.length === 0) setStatus("Person not visible");
+        else setStatus("Tracking one person");
+        if (!sock.current) return;
         const frame: PoseFrame = {
           session_id: session.current,
           camera_id: "browser-camera",
@@ -337,14 +307,10 @@ export function Capture({
             sourceRef.current === "live"
               ? Date.now() / 1000
               : replayTime.current + element.currentTime,
-          poses: detected.map((p, i) => ({
-            track_id: i === index ? "subject" : "helper",
-            landmarks: p,
-          })),
+          poses: detected.length === 1 ? [{ track_id: "subject", landmarks: detected[0] }] : [],
           monitored_track_id: "subject",
-          tracking_ambiguous: lost.current,
+          tracking_ambiguous: detected.length !== 1,
           source: sourceRef.current as "live" | "upload",
-          region,
           demo_time_scale: 1,
         };
         if (sock.current.send(frame) && sourceRef.current === "upload") recordedFrames.current.push(frame);
@@ -367,7 +333,7 @@ export function Capture({
           try {
             const bitmap = await createImageBitmap(element);
             worker.current?.postMessage(
-              { type: "frame", bitmap, timestamp: performance.now(), region },
+              { type: "frame", bitmap, timestamp: performance.now() },
               [bitmap],
             );
           } catch {
@@ -403,8 +369,11 @@ export function Capture({
   let signal: { kind: SignalKind; title: string; detail: string } = {
     kind: "warning", title: "Checking movement", detail: "Keep the person clearly in view.",
   };
-  if (activeAlert || verdict?.event) {
-    signal = { kind: "alert", title: "Concern detected", detail: "Review the alert details below." };
+  const alertCount = verdict?.events?.length ?? activeEventIds.length;
+  if (preview && poses.length > 1 && !verdict) {
+    signal = { kind: "warning", title: "One person only", detail: "Clear the room before monitoring continues." };
+  } else if (activeAlert || verdict?.events?.length) {
+    signal = { kind: "alert", title: alertCount > 1 ? `${alertCount} concerns detected` : "Concern detected", detail: "Review the alerts for details." };
   } else if (verdictBusy && !verdict) {
     signal = { kind: "warning", title: "Reviewing video", detail: "Checking the recorded movement." };
   } else if (verdict?.status === "uncertain" || verdict?.status === "reviewing" || (verdict && !verdict.scored_windows)) {
@@ -414,13 +383,13 @@ export function Capture({
   } else if (status.includes("Reconnecting") || status.includes("interrupted") || status.includes("expired")) {
     signal = { kind: "warning", title: "Connection interrupted", detail: "Monitoring may be paused." };
   } else if (lost.current) {
-    signal = { kind: "warning", title: "Person not identified", detail: "Select the person again to continue." };
+    signal = { kind: "warning", title: "Person not visible", detail: "Keep one person clearly in view." };
   } else if (!selectedRef.current) {
-    signal = { kind: "warning", title: "Select a person", detail: "Choose who to monitor in the video." };
+    signal = { kind: "warning", title: "Waiting for one person", detail: "Monitoring starts when one person is visible." };
   } else if (result?.quality === "uncertain" || result?.rule_hits?.length) {
     signal = { kind: "warning", title: "Movement uncertain", detail: "Continue monitoring for a clearer reading." };
   } else if (result?.quality === "good" && result.accepted) {
-    signal = { kind: "good", title: "No concern detected", detail: "The person is identified and monitoring is active." };
+    signal = { kind: "good", title: "No concern detected", detail: "One person is in view and monitoring is active." };
   }
   const triage = <TriageProgress
     event={verdict?.event ?? activeEvent}
@@ -431,6 +400,7 @@ export function Capture({
     quality={result?.quality}
     scoredWindows={verdict?.scored_windows}
   />;
+  const bounds = preview && poses.length === 1 ? personBounds(poses[0]) : null;
   return (
     <section className="panel capture-panel">
       <div className="panel-heading">
@@ -454,16 +424,9 @@ export function Capture({
           onEnded={() => void finishUpload()}
         />
         {!preview && <div className="room-grid" />}
-        {preview && poses.length > 0 && <Skeleton poses={poses} selected={selected} />}
-        {preview && poses.map((pose, index) => {
-          const bounds = personBounds(pose);
-          if (!bounds) return null;
-          const identified = selectedRef.current && !lost.current && selected === index;
-          return <div key={index} className={`person-tracking-box ${identified ? "identified" : "candidate"}`}
-            style={bounds} aria-hidden="true">
-            <span>{identified ? "Identified" : `Person ${index + 1}`}</span>
-          </div>;
-        })}
+        {preview && poses.length === 1 && <Skeleton pose={poses[0]} />}
+        {bounds && <div className="person-tracking-box identified"
+          style={bounds} aria-hidden="true"><span>Monitored person</span></div>}
         {!preview && poses.length === 0 && (
           <div className="camera-empty">
             <div className="camera-icon">
@@ -479,24 +442,11 @@ export function Capture({
             {source || "Capture device"}
           </span>
         </div>
-        {preview && <div className={`camera-analysis-status status-${signal.kind}`} role="status" aria-live="polite">
-          <SignalIcon kind={signal.kind} />
-          <div><strong>{signal.title}</strong><span>{signal.detail}</span></div>
-        </div>}
       </div>
-      {preview && poses.length > 0 && (sourceRef.current === "live" || (!selectedRef.current && poses.length > 1)) && (
-        <div className="select-person">
-          {poses.map((_, i) => (
-            <button
-              key={i}
-              className={selected === i ? "small primary" : "small secondary"}
-              onClick={() => { choose(i); if (sourceRef.current === "upload") void video.current?.play(); }}
-            >
-              Monitor person {i + 1}
-            </button>
-          ))}
-        </div>
-      )}
+      {preview && <div className={`camera-analysis-status status-${signal.kind}`} role="status" aria-live="polite">
+        <SignalIcon kind={signal.kind} />
+        <div><strong>{signal.title}</strong><span>{signal.detail}</span></div>
+      </div>}
       <div className="capture-actions">
         <button
           className="primary"
@@ -524,7 +474,7 @@ export function Capture({
       {fileName && <p className="capture-file">{fileName} · Video stays in this browser while movement is analyzed.</p>}
       {(verdictBusy || verdict) && <section className={`capture-verdict status-${signal.kind}`} aria-live="polite">
         <div className="capture-verdict-heading"><SignalIcon kind={signal.kind} size={24} />
-          <div><span className="eyebrow">VIDEO ANALYSIS</span><h3>{verdict?.event?.summary || signal.title}</h3></div>
+          <div><span className="eyebrow">VIDEO ANALYSIS</span><h3>{alertCount > 1 ? `${alertCount} alerts detected` : verdict?.event?.summary || signal.title}</h3></div>
         </div>
         {triage}
       </section>}
@@ -553,11 +503,7 @@ export function Capture({
               </button>
               <button
                 className="primary"
-                disabled={
-                  consentBusy ||
-                  region.x1 >= region.x2 ||
-                  region.y1 >= region.y2
-                }
+                disabled={consentBusy}
                 onClick={() => consentCapture(true)}
               >
                 Start {pendingCapture ? "video" : "camera"}

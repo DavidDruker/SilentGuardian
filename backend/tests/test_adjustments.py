@@ -124,13 +124,13 @@ def test_reviewed_calibration_fits_and_preserves_first_anchor(client, clock):
     assert not b['trigger_enabled']
 
 
-def test_mask_excludes_nearby_bystander_as_helper(guardian):
+def test_second_person_remains_uncertain_even_with_mask(guardian):
     frame = next(scenario_frames('restricted_standing', 'margaret'))
     bystander = Pose(track_id='outside', landmarks=[p.model_copy(update={'x': p.x+.25}) for p in frame.poses[0].landmarks])
     unmasked = frame.model_copy(update={'poses': frame.poses+[bystander]})
-    assert 'restricted_standing' not in guardian.ingest(unmasked).rule_hits
+    assert guardian.ingest(unmasked).quality == 'uncertain'
     masked = unmasked.model_copy(update={'session_id': 'masked', 'region': BedZone(x1=.3,y1=0,x2=.65,y2=1)})
-    assert 'restricted_standing' in guardian.ingest(masked).rule_hits
+    assert guardian.ingest(masked).quality == 'uncertain'
     outside = masked.model_copy(update={'session_id': 'outside-subject', 'region': BedZone(x1=0,y1=0,x2=.2,y2=1)})
     assert guardian.ingest(outside).quality == 'uncertain'
 

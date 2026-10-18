@@ -6,7 +6,7 @@ The October 17 adjustment document guides this implementation. It is not authori
 | --- | --- | --- |
 | Personal baseline | Six median/MAD features per posture, contribution explanations, frozen anchor, automatic daily 80/20 update, post-update pose-window deletion, persistent-trigger gate | Real calibration and independent held-out recordings |
 | Demo timing | Labelled 8× replay clock; 130-second long-lie fixture plays in roughly 16 seconds at target speed; replay check-in/escalation delays scale too | Rehearse on the presentation machine; inference/network delays may extend playback |
-| Bystanders and check-in | Pixels outside the chosen area masked before MediaPipe; out-of-area hips excluded on client and server; on-screen check-in | Test actual hall lighting, occlusion and camera angles |
+| Bystanders and check-in | Full-frame detection marks zero or multiple visible people uncertain; only a single visible person's landmarks enter scoring; on-screen check-in | Test actual hall lighting, occlusion and camera angles |
 | Human oversight | Real concern/False alarm with audit; pending sends cancelled on dismissal; continued long-lie evidence can reopen a higher-floor alert | Staged harmless bends and real contact response |
 | Gemini role | Second-assessment status in event detail; actual proposed/applied floor audit (the simulated downgrade endpoint remains, with no UI button); request/window ratio | Billed project, consent, actual model response and timing |
 | Privacy | Skeleton-only default; logged local raw-preview override; category-only Gemini profile context; consent/decline/pause; per-profile purge and visible row counts | Real Tiger purge/aggregate refresh; provider logs/backups remain outside app deletion |

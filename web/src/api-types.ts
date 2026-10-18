@@ -818,6 +818,8 @@ export interface components {
             rule_hits?: string[];
             /** Event Id */
             event_id?: string | null;
+            /** Event Ids */
+            event_ids?: string[];
             /** Anomaly Score */
             anomaly_score?: number | null;
             /** Anchor Score */

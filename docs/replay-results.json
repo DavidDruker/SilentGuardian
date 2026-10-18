@@ -12,7 +12,7 @@
       ],
       "first_event_at_s": 2.667,
       "fall_onset_to_queued_alert_s": 0.667,
-      "ingest_p95_ms": 10.68,
+      "ingest_p95_ms": 9.5,
       "notification_states": [
         "simulated",
         "pending"
@@ -29,7 +29,7 @@
       ],
       "first_event_at_s": 2.667,
       "fall_onset_to_queued_alert_s": null,
-      "ingest_p95_ms": 9.72,
+      "ingest_p95_ms": 8.85,
       "notification_states": []
     },
     {
@@ -37,15 +37,17 @@
       "profile": "margaret",
       "source": "synthetic landmarks",
       "observed_seconds": 9,
-      "event_count": 1,
+      "event_count": 2,
       "rule_hits": [
         "restricted_standing",
         "stumble"
       ],
       "first_event_at_s": 0.0,
       "fall_onset_to_queued_alert_s": null,
-      "ingest_p95_ms": 10.85,
+      "ingest_p95_ms": 12.32,
       "notification_states": [
+        "simulated",
+        "pending",
         "simulated",
         "pending"
       ]
@@ -59,7 +61,7 @@
       "rule_hits": [],
       "first_event_at_s": null,
       "fall_onset_to_queued_alert_s": null,
-      "ingest_p95_ms": 8.14,
+      "ingest_p95_ms": 9.38,
       "notification_states": []
     },
     {
@@ -73,7 +75,7 @@
       ],
       "first_event_at_s": 0.0,
       "fall_onset_to_queued_alert_s": null,
-      "ingest_p95_ms": 9.38,
+      "ingest_p95_ms": 9.27,
       "notification_states": [
         "simulated",
         "pending"
@@ -88,7 +90,7 @@
       "rule_hits": [],
       "first_event_at_s": null,
       "fall_onset_to_queued_alert_s": null,
-      "ingest_p95_ms": 6.93,
+      "ingest_p95_ms": 8.2,
       "notification_states": []
     },
     {
@@ -100,7 +102,7 @@
       "rule_hits": [],
       "first_event_at_s": null,
       "fall_onset_to_queued_alert_s": null,
-      "ingest_p95_ms": 7.02,
+      "ingest_p95_ms": 1.95,
       "notification_states": []
     },
     {
@@ -114,7 +116,7 @@
       ],
       "first_event_at_s": 7.0,
       "fall_onset_to_queued_alert_s": null,
-      "ingest_p95_ms": 7.86,
+      "ingest_p95_ms": 9.06,
       "notification_states": []
     },
     {
@@ -122,15 +124,17 @@
       "profile": "margaret",
       "source": "synthetic landmarks",
       "observed_seconds": 9,
-      "event_count": 1,
+      "event_count": 2,
       "rule_hits": [
         "bed_exit",
         "restricted_standing"
       ],
       "first_event_at_s": 0.0,
       "fall_onset_to_queued_alert_s": null,
-      "ingest_p95_ms": 8.2,
+      "ingest_p95_ms": 9.25,
       "notification_states": [
+        "simulated",
+        "pending",
         "simulated",
         "pending"
       ]
@@ -144,7 +148,7 @@
       "rule_hits": [],
       "first_event_at_s": null,
       "fall_onset_to_queued_alert_s": null,
-      "ingest_p95_ms": 2.62,
+      "ingest_p95_ms": 2.65,
       "notification_states": []
     }
   ],

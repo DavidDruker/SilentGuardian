@@ -72,7 +72,8 @@ class ActionWorker:
             self.streams.clear()
             self.pending.clear()
 
-    def observe(self, stream_id, profile, samples, quality, event_id, rule_hits, source):
+    def observe(self, stream_id, profile, samples, quality, event_ids, rule_hits, source):
+        event_ids = [event_ids] if isinstance(event_ids, str) else list(event_ids or [])
         if self.state != 'ready' or self.closed:
             return dict(status=self.state, mode='shadow', model=MODEL_ID)
         try:
@@ -93,7 +94,7 @@ class ActionWorker:
             previous = self.streams.get(stream_id)
             if previous is None or previous['version'] != profile.version:
                 previous = dict(person_id=profile.id, version=profile.version, token=str(uuid4()),
-                                result=None, submitted=-1, seen=now, last_event=None)
+                                result=None, submitted=-1, seen=now, last_events=[])
                 self.streams[stream_id] = previous
             previous['seen'] = now
             self.streams.move_to_end(stream_id)
@@ -105,16 +106,20 @@ class ActionWorker:
                 pending = self.pending.get(stream_id)
                 # Preserve a new event's first complete window even under 8x replay
                 # overload; a later static pose must not erase its transition.
-                if not pending or not pending['event_transition']:
+                if pending and pending['event_transition']:
+                    pending['event_ids'] = list(dict.fromkeys(pending['event_ids'] + event_ids))
+                    pending['rule_hits'] = list(dict.fromkeys(pending['rule_hits'] + list(rule_hits)))
+                    previous['last_events'] = pending['event_ids']
+                else:
                     if pending:
                         self.replaced += 1
-                    transition = bool(event_id and event_id != previous['last_event'])
+                    transition = any(event_id not in previous['last_events'] for event_id in event_ids)
                     self.pending[stream_id] = dict(stream_id=stream_id, person_id=profile.id,
                         version=profile.version, token=previous['token'], samples=samples,
-                        event_id=event_id, rule_hits=list(rule_hits), source=source,
+                        event_ids=event_ids, rule_hits=list(rule_hits), source=source,
                         event_transition=transition)
                     if transition:
-                        previous['last_event'] = event_id
+                        previous['last_events'] = event_ids
                         self.pending.move_to_end(stream_id, last=False)
                 previous['submitted'] = observed
             result = previous['result']
@@ -166,17 +171,18 @@ class ActionWorker:
             # Update only evidence. The model cannot create/escalate/suppress an event.
             encoded = json.dumps(result)
             window.features = {**window.features, 'action_prediction_json': encoded}
-            event = session.get(Event, job['event_id']) if job['event_id'] else None
-            if event and event.stream_id == job['stream_id']:
-                previous = json.loads(event.features.get('action_prediction_json', 'null'))
-                if previous is None or result['fall_score'] > previous['fall_score']:
-                    event.features = {**event.features, 'action_prediction_json': encoded}
-                    append_stage(session, person_id=event.person_id,
-                                 candidate_id=event.features.get('candidate_id'), event_id=event.id,
-                                 stage='ml_result', outcome='shadow_scored', source=event.source,
-                                 when=self.g.clock(), urgency=event.urgency,
-                                 details={'model': result['model'], 'latency_ms': result['latency_ms'],
-                                          'fall_score': round(result['fall_score'], 4)})
+            for event_id in job['event_ids']:
+                event = session.get(Event, event_id)
+                if event and event.stream_id == job['stream_id']:
+                    previous = json.loads(event.features.get('action_prediction_json', 'null'))
+                    if previous is None or result['fall_score'] > previous['fall_score']:
+                        event.features = {**event.features, 'action_prediction_json': encoded}
+                        append_stage(session, person_id=event.person_id,
+                                     candidate_id=event.features.get('candidate_id'), event_id=event.id,
+                                     stage='ml_result', outcome='shadow_scored', source=event.source,
+                                     when=self.g.clock(), urgency=event.urgency,
+                                     details={'model': result['model'], 'latency_ms': result['latency_ms'],
+                                              'fall_score': round(result['fall_score'], 4)})
             if record['result'] is None or record['result']['observed_at'] <= result['observed_at']:
                 record['result'] = result
             self.completed += 1

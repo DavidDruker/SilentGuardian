@@ -6,7 +6,7 @@ import hashlib
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 
 from .db import Audit, Candidate, Event, EventStage, Notification, Person, ProfileVersion, Stream, Window
 from .detector import evaluate
@@ -210,40 +210,55 @@ class Guardian:
                            quality=features.get('visibility', 0), features=features, rule_hits=hits,
                            calibration=p.id in self.calibrating and window_ready and not hits and result['quality'] == 'good',
                            sequence=None))
-            recent = s.scalar(select(Event).where(Event.stream_id == stream_id).order_by(Event.opened_at.desc()).limit(1))
-            active = recent if recent and recent.status in ('open', 'pending_review') else None
-            ev = active
+            recent_events = list(s.scalars(select(Event).where(
+                Event.stream_id == stream_id,
+                or_(Event.status.in_(('open', 'pending_review')),
+                    Event.updated_at >= now - 60/frame.demo_time_scale),
+            ).order_by(Event.opened_at.desc())))
+            latest_by_rule = {}
+            for previous in recent_events:
+                if previous.rule_hits:
+                    latest_by_rule.setdefault(previous.rule_hits[0], previous)
+            active_by_rule = {hit: event for hit, event in latest_by_rule.items()
+                              if event.status in ('open', 'pending_review')}
             gate_prediction = None
-            if hits:
-                floor = 3 if features.get('still_seconds', 0) >= 120 else 2 if any(h in hits for h in ('fall', 'prolonged_stillness', 'restricted_standing', 'bed_exit')) else 1
-                if p.mode == 'care' and 'stumble' in hits and p.mobility_aid != 'none':
+            for hit in dict.fromkeys(hits):
+                if hit == 'prolonged_stillness' and features.get('still_seconds', 0) >= 120:
+                    floor = 3
+                elif hit in ('fall', 'prolonged_stillness', 'restricted_standing', 'bed_exit'):
+                    floor = 2
+                else:
+                    floor = 1
+                if p.mode == 'care' and hit == 'stumble' and p.mobility_aid != 'none':
                     floor = max(floor, 2)
-                cooldown = recent and now-recent.updated_at < 60/frame.demo_time_scale and set(hits).issubset(recent.rule_hits) and floor <= recent.floor_urgency
+                recent = latest_by_rule.get(hit)
+                ev = active_by_rule.get(hit)
+                cooldown = recent and now-recent.updated_at < 60/frame.demo_time_scale and floor <= recent.floor_urgency
                 candidate_cooldown = (self.settings.decision_mode == 'enforce' and
-                                      frame.timestamp-state.get('last_candidate_at', -1e12) < 2)
+                                      frame.timestamp-state.get('last_candidate_at_by_rule', {}).get(hit, -1e12) < 2)
                 if not ev and not cooldown and not candidate_cooldown:
                     candidate_id = str(uuid4())
                     idempotency_key = hashlib.sha256(
-                        f'{stream_id}:{frame.timestamp:.6f}:{p.version}'.encode()).hexdigest()
+                        f'{stream_id}:{hit}:{frame.timestamp:.6f}:{p.version}'.encode()).hexdigest()
                     candidate = Candidate(id=candidate_id, idempotency_key=idempotency_key,
                                           person_id=p.id, stream_id=stream_id, profile_version=p.version,
                                           observed_at=frame.timestamp, created_at=now, source=frame.source,
-                                          quality=result['quality'], rule_hits=list(hits), features=dict(features),
+                                          quality=result['quality'], rule_hits=[hit], features=dict(features),
                                           samples=list(samples), decision='shadow', reason='rules_shadow',
                                           model_result=None, event_id=None)
                     s.add(candidate)
                     candidate_stages = [append_stage(s, person_id=p.id, candidate_id=candidate_id, event_id=None,
                                  stage='candidate', outcome='rule_hit', source=frame.source, when=now,
-                                 urgency=floor, details={'rule_hits': hits},
+                                  urgency=floor, details={'rule_hits': [hit]},
                                  policy_version=POLICY_VERSION if self.settings.decision_mode == 'enforce' else 'rules-shadow-v1')]
                     model_result = None
                     policy = None
                     if self.settings.decision_mode == 'enforce':
-                        state['last_candidate_at'] = frame.timestamp
+                        state.setdefault('last_candidate_at_by_rule', {})[hit] = frame.timestamp
                         cached['state'] = dict(state)
                         model_result = self.score_candidate(candidate, samples)
                         gate_prediction = model_result
-                        policy = decide(hits, floor, model_result, self.settings.fall_score_threshold)
+                        policy = decide([hit], floor, model_result, self.settings.fall_score_threshold)
                         candidate.decision, candidate.reason, candidate.model_result = policy.action, policy.reason, model_result
                         candidate_stages.append(append_stage(s, person_id=p.id, candidate_id=candidate_id, event_id=None,
                                      stage='ml_result', outcome='scored' if model_result else 'unavailable',
@@ -266,14 +281,16 @@ class Guardian:
                                           else 'model_supported_no_gemini' if policy else 'rules_only')
                         ev = Event(id=str(uuid4()), person_id=p.id, stream_id=stream_id, profile=p.model_dump(),
                                    source=frame.source, opened_at=now, observed_at=frame.timestamp, updated_at=now,
-                                   rule_hits=hits, floor_urgency=floor, urgency=floor,
-                                   status='pending_review' if provisional else 'open', summary=LABELS[hits[0]],
+                                   rule_hits=[hit], floor_urgency=floor, urgency=floor,
+                                   status='pending_review' if provisional else 'open', summary=LABELS[hit],
                                    features={**features, 'candidate_id': candidate_id,
                                              **({'action_prediction_json': json.dumps(model_result)} if model_result else {})},
                                    keyframes=keyframes, verdict_status=verdict_status,
                                    next_escalation_at=now+(p.check_in_seconds if floor == 1 and p.mode == 'personal' and p.check_in_first else 180)/frame.demo_time_scale)
                         s.add(ev)
                         s.flush()
+                        active_by_rule[hit] = ev
+                        latest_by_rule[hit] = ev
                         candidate.event_id = ev.id
                         for stage_row in candidate_stages:
                             stage_row.event_id = ev.id
@@ -285,22 +302,25 @@ class Guardian:
                             self.queue(s, ev, now)
                 elif ev:
                     old = ev.urgency
-                    ev.rule_hits = list(dict.fromkeys(ev.rule_hits+hits))
                     ev.floor_urgency = max(ev.floor_urgency, floor)
                     ev.urgency = max(ev.urgency, floor)
                     ev.features, ev.updated_at = event_features(ev.features, features), now
                     if ev.urgency > old:
-                        ev.summary = LABELS['prolonged_stillness'] if 'prolonged_stillness' in hits else LABELS[hits[0]]
                         self.queue(s, ev, now)
-            if ev and result['quality'] == 'good':
-                ev.features = event_features(ev.features, features)
+            active_events = list(active_by_rule.values())
+            if result['quality'] == 'good':
+                for ev in active_events:
+                    ev.features = event_features(ev.features, features)
+            active_events.sort(key=lambda ev: (ev.urgency, ev.opened_at), reverse=True)
             prediction = (gate_prediction or {'status': 'not_requested', 'mode': 'enforce'}
-                          if self.settings.decision_mode == 'enforce' else
-                          self.actions.observe(stream_id, p, samples, result['quality'],
-                                               ev.id if ev else None, hits,
-                                               'synthetic' if frame.camera_id == 'synthetic-demo' else frame.source))
+                           if self.settings.decision_mode == 'enforce' else
+                           self.actions.observe(stream_id, p, samples, result['quality'],
+                                                [ev.id for ev in active_events], hits,
+                                                'synthetic' if frame.camera_id == 'synthetic-demo' else frame.source))
             return IngestResult(accepted=True, reason=reason, quality=result['quality'], features=features,
-                                rule_hits=hits, event_id=ev.id if ev else None, anomaly_score=baseline['score'], anchor_score=baseline['anchor_score'],
+                                rule_hits=hits, event_id=active_events[0].id if active_events else None,
+                                event_ids=[ev.id for ev in active_events],
+                                anomaly_score=baseline['score'], anchor_score=baseline['anchor_score'],
                                 baseline_contributions=baseline['contributions'], baseline_state=baseline['state'],
                                 action_prediction=prediction)
 
@@ -384,15 +404,18 @@ class Guardian:
                 raise KeyError(person_id)
             windows = s.scalar(select(func.count()).select_from(Window).where(
                 Window.stream_id == stream_id)) or 0
-            ev = s.scalar(select(Event).where(Event.stream_id == stream_id,
-                                              Event.source == 'upload').order_by(Event.opened_at.desc()).limit(1))
-            candidate = s.scalar(select(Candidate).where(Candidate.stream_id == stream_id).order_by(Candidate.observed_at.desc()).limit(1))
+            events = list(s.scalars(select(Event).where(Event.stream_id == stream_id,
+                                                       Event.source == 'upload')))
+            events.sort(key=lambda event: (event.urgency, event.opened_at), reverse=True)
+            candidate_filter = Candidate.event_id == events[0].id if events else Candidate.stream_id == stream_id
+            candidate = s.scalar(select(Candidate).where(candidate_filter).order_by(Candidate.observed_at.desc()).limit(1))
             return {'session_id': session_id, 'scored_windows': windows,
-                    'status': 'reviewing' if ev and ev.status == 'pending_review' else
-                              'uncertain' if not ev and candidate and candidate.decision == 'hold' else 'ready',
+                    'status': 'reviewing' if any(event.status == 'pending_review' for event in events) else
+                              'uncertain' if not events and candidate and candidate.decision == 'hold' else 'ready',
                     'candidate_decision': candidate.decision if candidate else None,
                     'decision_reason': candidate.reason if candidate else None,
-                    'event': self.event_out(s, ev).model_dump() if ev else None}
+                    'event': self.event_out(s, events[0]).model_dump() if events else None,
+                    'events': [self.event_out(s, event).model_dump() for event in events]}
 
     def cleanup(self):
         now = self.clock()

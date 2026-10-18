@@ -85,6 +85,16 @@ def test_event_comparison_never_changes_urgency_or_gemini_input(guardian):
     assert guardian.event(event.id).status == 'acknowledged'
 
 
+def test_shadow_result_is_attached_to_each_open_rule_alert(guardian):
+    ready(guardian)
+    for frame in scenario_frames('fall', 'margaret', guardian.clock(), duration=4):
+        guardian.ingest(frame)
+        guardian.actions.tick()
+    events = {event.rule_hits[0]: event for event in guardian.events()}
+    assert set(events) == {'restricted_standing', 'fall'}
+    assert all(event.action_prediction['fall_score'] == .99 for event in events.values())
+
+
 def test_late_result_is_discarded_after_consent_revocation(guardian):
     ready(guardian)
     for f in scenario_frames('normal', 'daniel', guardian.clock(), duration=2.5): guardian.ingest(f)

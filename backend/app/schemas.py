@@ -210,6 +210,7 @@ class IngestResult(StrictModel):
     features: dict[str, float | str | bool | None] = Field(default_factory=dict)
     rule_hits: list[str] = Field(default_factory=list)
     event_id: str | None = None
+    event_ids: list[str] = Field(default_factory=list)
     anomaly_score: float | None = None
     anchor_score: float | None = None
     baseline_contributions: list[dict] = Field(default_factory=list)

@@ -1989,6 +1989,13 @@
             ],
             "title": "Event Id"
           },
+          "event_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Event Ids"
+          },
           "anomaly_score": {
             "anyOf": [
               {

@@ -29,7 +29,7 @@ def run(g, name, person='daniel', duration=8):
 def test_actual_pipeline_scenarios(guardian,scenario,person,hit):
     out=run(guardian,scenario,person,duration=9)
     assert any(hit in r.rule_hits for r in out)
-    assert len(guardian.events())==1
+    assert len(guardian.events()) == (2 if scenario == 'bed_exit' else 1)
     with guardian.db.sessions() as s:
         assert len(list(s.scalars(select(Window))))>=20
 
@@ -38,6 +38,27 @@ def test_actual_pipeline_scenarios(guardian,scenario,person,hit):
 def test_negative_scenarios(guardian,scenario,person):
     run(guardian,scenario,person)
     assert guardian.events()==[]
+
+
+def test_restricted_standing_and_fall_open_independent_alerts(guardian):
+    frames = [frame.model_copy(update={'source': 'upload', 'camera_id': 'browser-camera'})
+              for frame in scenario_frames('fall', 'margaret')]
+    results = [guardian.ingest(frame) for frame in frames]
+    events = {event.rule_hits[0]: event for event in guardian.events()}
+    assert set(events) == {'restricted_standing', 'fall'}
+    assert all(event.status == 'open' and event.notifications for event in events.values())
+    assert any(set(result.event_ids) == {events['fall'].id, events['restricted_standing'].id}
+               for result in results)
+    capture = guardian.capture_result('margaret', frames[0].session_id)
+    assert {event['rule_hits'][0] for event in capture['events']} == {'restricted_standing', 'fall'}
+    guardian.acknowledge(events['restricted_standing'].id, 'Tester', 'Checked standing')
+    assert guardian.event(events['fall'].id).status == 'open'
+
+
+def test_multiple_people_do_not_enter_single_person_detector(guardian):
+    results = run(guardian, 'assisted_standing', 'margaret')
+    assert all(result.quality == 'uncertain' for result in results)
+    assert guardian.events() == []
 
 
 def test_low_visibility_is_uncertain_not_normal(guardian):

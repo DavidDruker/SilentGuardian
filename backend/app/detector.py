@@ -24,6 +24,10 @@ def quiet_hours(profile, timestamp):
 
 
 def sample(frame: PoseFrame, profile: Profile):
+    # This capture pipeline is for one person in the room. A second visible pose
+    # makes the frame uncertain instead of selecting one person's landmarks.
+    if len(frame.poses) != 1:
+        return None
     if frame.region:
         region = frame.region
         poses = [p for p in frame.poses if region.x1 <= midpoint(p.landmarks, 23, 24)[0] <= region.x2
@@ -48,12 +52,6 @@ def sample(frame: PoseFrame, profile: Profile):
     zone = profile.bed_zone
     in_bed = bool(zone and zone.x1 <= hip[0] <= zone.x2 and zone.y1 <= hip[1] <= zone.y2)
     helper = False
-    for other in frame.poses:
-        if other.track_id == frame.monitored_track_id:
-            continue
-        if min(other.landmarks[k].visibility for k in (11, 12, 23, 24)) < .6:
-            continue
-        helper |= math.dist(hip, midpoint(other.landmarks, 23, 24)) / torso < 2.0
     vector = [v for k in MODEL_KEYS for v in ((points[k].x - hip[0]) / torso, (points[k].y - hip[1]) / torso)]
     return dict(t=frame.timestamp, x=hip[0], y=hip[1], torso=torso, angle=angle,
                 posture=posture, quality=quality, in_bed=in_bed, helper=helper,

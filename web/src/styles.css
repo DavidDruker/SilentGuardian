@@ -625,10 +625,6 @@ nav button.active {
   height: 100%;
   pointer-events: none;
 }
-.skeleton text {
-  font-family: var(--font);
-  font-weight: 600;
-}
 .person-tracking-box {
   position: absolute;
   z-index: 2;
@@ -641,9 +637,6 @@ nav button.active {
   border: 2px solid #f24a52;
   box-shadow: 0 0 0 1px rgb(18 28 43 / 30%), 0 0 9px rgb(242 74 82 / 30%);
 }
-.person-tracking-box.candidate {
-  border: 1px dashed rgb(255 255 255 / 75%);
-}
 .person-tracking-box > span {
   position: absolute;
   top: 0;
@@ -655,7 +648,6 @@ nav button.active {
   font-weight: 700;
   white-space: nowrap;
 }
-.person-tracking-box.candidate > span { background: rgb(15 29 49 / 82%); }
 .camera-empty {
   position: absolute;
   inset: 0;
@@ -708,11 +700,7 @@ nav button.active {
   display: none;
 }
 .camera-analysis-status {
-  position: absolute;
-  z-index: 3;
-  left: 16px;
-  right: 16px;
-  bottom: 14px;
+  margin-top: 12px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -750,17 +738,6 @@ nav button.active {
 }
 .capture-actions .icon-button {
   margin-left: auto;
-}
-.select-person {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-}
-.select-person > span {
-  font-size: 14px;
-  color: var(--slate);
 }
 .replay-controls {
   display: flex;
