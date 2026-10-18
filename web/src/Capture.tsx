@@ -38,13 +38,13 @@ const CONCERN_NAMES: Record<string, string> = {
   personal_baseline: "Unusual movement",
 };
 const REVIEW_LABELS: Record<string, string> = {
-  pending: "Gemini reviewing",
-  validated: "Gemini reviewed",
-  fallback: "Gemini unavailable",
+  pending: "Reviewing",
+  validated: "Reviewed",
+  fallback: "Review failed",
   model_supported_no_gemini: "ML confirmed",
   model_fallback: "Safety rule",
-  rules_only: "Rule alert",
-  not_reviewed: "Not sent: a more urgent alert was reviewed",
+  rules_only: "Rule",
+  not_reviewed: "Not sent",
 };
 const clipTime = (seconds: number) => {
   const s = Math.max(0, seconds);
@@ -482,41 +482,41 @@ export function Capture({
     }
   };
   let signal: { kind: SignalKind; title: string; detail: string } = {
-    kind: "warning", title: "Checking movement", detail: "Keep the person clearly in view.",
+    kind: "warning", title: "Checking movement", detail: "",
   };
   const logged = alertLog.length;
-  const loggedNote = `${logged} alert${logged === 1 ? "" : "s"} logged below.`;
+  const loggedNote = `${logged} alert${logged === 1 ? "" : "s"} logged.`;
   if (preview && people > 1 && !verdict) {
-    signal = { kind: "warning", title: "One person only", detail: "Clear the room before monitoring continues." };
+    signal = { kind: "warning", title: "One person only", detail: "Paused until one person remains." };
   } else if (concern === "on_floor" && (lost.current || result?.quality === "uncertain")) {
     // Out of clear view since the last reading on the floor: keep the alert, but say so.
-    signal = { kind: "alert", title: "Last seen on the floor", detail: "Lost clear view of them after the fall. Check on them." };
+    signal = { kind: "alert", title: "Last seen on the floor", detail: "Check on them." };
   } else if (concern === "on_floor") {
     signal = { kind: "alert", title: "Person is on the floor", detail: verdict
-      ? "The video ended with them still down after the fall." : "Down since the fall and not up yet." };
+      ? "Still down at the end." : "Not up since the fall." };
   } else if (concern && concern !== "on_floor_watch") {
-    signal = { kind: "alert", title: CONCERN_NAMES[concern] ?? concern.replaceAll("_", " "), detail: "Happening now. " + loggedNote };
+    signal = { kind: "alert", title: CONCERN_NAMES[concern] ?? concern.replaceAll("_", " "), detail: "Happening now." };
   } else if (concern === "on_floor_watch") {
     signal = { kind: "warning", title: "Person on the floor", detail: verdict
-      ? "No fall was confirmed, but the video ended with them on the floor." : "No fall confirmed. Watching whether they get up." };
+      ? "Fall not confirmed." : "Fall not confirmed." };
   } else if (verdictBusy && !verdict) {
-    signal = { kind: "warning", title: "Reviewing video", detail: "Checking the recorded movement." };
+    signal = { kind: "warning", title: "Reviewing video", detail: "" };
   } else if (verdict?.status === "uncertain" || (verdict && !verdict.scored_windows)) {
-    signal = { kind: "warning", title: "Result uncertain", detail: "Try a clearer video with the person fully visible." };
+    signal = { kind: "warning", title: "Result uncertain", detail: "Person not clearly visible." };
   } else if (verdict) {
     signal = { kind: "good", title: logged ? "Person appears fine now" : "No concern detected",
-      detail: logged ? loggedNote : "No alert was triggered in this video." };
+      detail: logged ? loggedNote : "" };
   } else if (status.includes("Reconnecting") || status.includes("interrupted") || status.includes("expired")) {
-    signal = { kind: "warning", title: "Connection interrupted", detail: "Monitoring may be paused." };
+    signal = { kind: "warning", title: "Connection interrupted", detail: "" };
   } else if (lost.current) {
-    signal = { kind: "warning", title: "Person not visible", detail: "Keep one person clearly in view." };
+    signal = { kind: "warning", title: "Person not visible", detail: "" };
   } else if (!selectedRef.current) {
-    signal = { kind: "warning", title: "Waiting for one person", detail: "Monitoring starts when one person is visible." };
+    signal = { kind: "warning", title: "Waiting for one person", detail: "" };
   } else if (result?.quality === "uncertain") {
-    signal = { kind: "warning", title: "Movement uncertain", detail: "Continue monitoring for a clearer reading." };
+    signal = { kind: "warning", title: "Movement uncertain", detail: "" };
   } else if (result?.quality === "good" && result.accepted) {
     signal = { kind: "good", title: logged ? "Person appears fine now" : "No concern detected",
-      detail: logged ? loggedNote : "One person is in view and monitoring is active." };
+      detail: logged ? loggedNote : "" };
   }
   const signalKey = `${signal.kind}|${signal.title}`;
   signals.current.set(signalKey, signal);
@@ -524,9 +524,8 @@ export function Capture({
   const shown = signals.current.get(shownKey) ?? signal;
   const geminiBlocker = !config.gemini_configured ? "No API key on server"
     : !config.gemini_billed_project_confirmed ? "Billing not confirmed on server" : undefined;
-  // Triage follows the most urgent alert: the one Gemini reviews for an upload.
-  const latestAlert = [...alertLog].sort((a, b) => b.urgency - a.urgency || b.observed_at - a.observed_at)[0]
-    ?? verdict?.event ?? null;
+  // Triage follows the last alert: the one Gemini reviews for an upload.
+  const latestAlert = alertLog.at(-1) ?? verdict?.event ?? null;
   const triage = <TriageProgress
     event={latestAlert}
     candidateDecision={verdict?.candidate_decision ?? lastDecision}
@@ -551,7 +550,7 @@ export function Capture({
         <span className="alert-log-name">{CONCERN_NAMES[event.rule_hits[0]] ?? event.summary}</span>
         <span className="alert-log-meta">{urgencyNames[event.urgency] ?? event.urgency} · {REVIEW_LABELS[event.verdict_status] ?? event.verdict_status.replaceAll("_", " ")}</span>
         {event.verdict_status === "fallback" && typeof event.features?.gemini_error === "string" &&
-          <span className="alert-log-error">{event.features.gemini_error}</span>}
+          <span className="alert-log-error" title={event.features.gemini_error}>{event.features.gemini_error.slice(0, 70)}</span>}
       </li>)}
     </ol>
   </section>;
@@ -641,12 +640,12 @@ export function Capture({
             ? <>
               <div className={`camera-analysis-status status-${shown.kind}`} role="status" aria-live="polite">
                 <SignalIcon kind={shown.kind} />
-                <div><strong>{shown.title}</strong><span>{shown.detail}</span></div>
+                <div><strong>{shown.title}</strong>{shown.detail && <span>{shown.detail}</span>}</div>
               </div>
               {triage}
               {alertLogSection}
             </>
-            : <p className="capture-analysis-empty">Start the camera or upload a video. The live analysis and alerts appear here.</p>}
+            : <p className="capture-analysis-empty">Start the camera or upload a video. Analysis appears here.</p>}
       </div>
       </div>
       {toast?.verdict && <aside className={`verdict-toast urgency-${toast.urgency}`} role="alert">

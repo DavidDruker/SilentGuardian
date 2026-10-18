@@ -30,7 +30,7 @@ export function TriageProgress({
     ? { label: "Rules", detail: "Flagged movement", state: "done" }
     : quality === "good" || scoredWindows > 0
       ? { label: "Rules", detail: "Checked", state: "done" }
-      : { label: "Rules", detail: "Waiting for clear view", state: "active" };
+      : { label: "Rules", detail: "Waiting", state: "active" };
 
   let ml: Stage = { label: "ML", detail: "Not used", state: "skipped" };
   if (hasRuleHit) {
@@ -62,11 +62,11 @@ export function TriageProgress({
   } else if (event?.verdict_status === "validated") {
     gemini = { label: "Gemini", detail: "Reviewed", state: "done" };
   } else if (event?.verdict_status === "fallback") {
-    gemini = { label: "Gemini", detail: "Review failed, reason in log", state: "done" };
+    gemini = { label: "Gemini", detail: "Failed", state: "done" };
   } else if (event?.verdict_status === "privacy_blocked") {
     gemini = { label: "Gemini", detail: "Consent blocked", state: "skipped" };
   } else if (event?.verdict_status === "not_reviewed") {
-    gemini = { label: "Gemini", detail: "One review per video: a more urgent alert", state: "skipped" };
+    gemini = { label: "Gemini", detail: "Not sent", state: "skipped" };
   } else if (["model_supported_no_gemini", "model_fallback"].includes(event?.verdict_status ?? "")) {
     gemini = { label: "Gemini", detail: geminiBlocker ?? "Not requested", state: "skipped" };
   }

@@ -19,7 +19,7 @@ from .schemas import Verdict
 from .stages import append_stage
 
 log = logging.getLogger('guardian')
-# Uploaded videos get one Gemini review, for their most urgent alert. The review
+# Uploaded videos get one Gemini review, for their last alert. The review
 # waits until the video has stopped sending frames for this long.
 UPLOAD_SETTLE_SECONDS = 3
 REVIEWED = ('validated', 'fallback')
@@ -153,19 +153,22 @@ class GeminiWorker:
                            if not part.get('thought'))
 
     def next_event(self, s):
-        """Most urgent pending alert that is ready for review."""
+        """Next alert ready for review. For an upload, its last alert once it has ended."""
         now = self.g.clock()
         for ev in s.scalars(select(Event).where(Event.verdict_status == 'pending')
                             .order_by(Event.urgency.desc(), Event.opened_at)):
             if ev.source == 'upload':
                 stream = s.get(Stream, ev.stream_id)
                 if stream is not None and now - stream.updated_at < UPLOAD_SETTLE_SECONDS:
-                    continue  # still playing: a more urgent alert may follow
+                    continue  # still playing: a later alert may follow
+                # The last alert in the video is treated as its biggest concern.
+                return s.scalar(select(Event).where(Event.stream_id == ev.stream_id, Event.verdict_status == 'pending')
+                                .order_by(Event.observed_at.desc()).limit(1))
             return ev
         return None
 
     def claim_upload_review(self, ev):
-        """One review per uploaded video: this (most urgent) alert, or none if used."""
+        """One review per uploaded video: this (last) alert, or none if used."""
         g = self.g
         with g.db.lock, g.db.sessions.begin() as s:
             others = list(s.scalars(select(Event).where(Event.stream_id == ev.stream_id, Event.id != ev.id)))
