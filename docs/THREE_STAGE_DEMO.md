@@ -14,7 +14,7 @@ Alerts are timestamped incidents. Hits of one rule within five seconds of each o
 
 `DECISION_MODE=shadow` keeps the earlier behaviour: rules open alerts directly and the ML only scores them; a supporting score sends that alert to Gemini review. Candidates, ML results, Gemini review, notifications, and acknowledgements append stage records to `event_stage_log` in both modes. The Activity page reads incident openings for the heat map and pose-window coverage separately. With Tiger Data, the completed hours come from `hourly_incidents`; the recent raw tail includes the current hour.
 
-The NTU60 model score is not a calibrated probability for this camera or motion. The fall-support cutoff (`FALL_SCORE_THRESHOLD`, 0.4) and staggering cutoff (0.1; staged stumbles scored 0.06-0.25 versus 0.00-0.02 for normal walking) come from two staged clips: review normal, staged-fall, and difficult false-positive clips and adjust them before relying on the gate. A brief clip that does not produce enough visible pose frames may produce an uncertain result. An absent rule trigger is reported as no alert, never as proof of safety.
+The NTU60 model score is not a calibrated probability for this camera or motion. The fall-support cutoff (`FALL_SCORE_THRESHOLD`, 0.25; staged falls scored 0.34 and 0.72) and staggering cutoff (0.1; staged stumbles scored 0.06-0.25 versus 0.00-0.02 for normal walking) come from two staged clips: review normal, staged-fall, and difficult false-positive clips and adjust them before relying on the gate. A brief clip that does not produce enough visible pose frames may produce an uncertain result. An absent rule trigger is reported as no alert, never as proof of safety.
 
 ## Local verification
 

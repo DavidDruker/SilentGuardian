@@ -348,11 +348,20 @@ class Guardian:
                     alerted.append(hit)
                     if hit in FLOOR_RULES:
                         state['floor_alert_id'] = ev.id
-            # The live concern describes this moment only. Once the person is up and
-            # settled (fall_seen clears after 3 s off the floor) there is no alert, but
-            # someone still down after a fall stays a concern, moving or not.
-            if not state.get('fall_seen'):
-                state.pop('floor_alert_id', None)
+            # The live concern describes this moment only. Lying on the floor (outside
+            # the bed) is never "fine": it is an alert after an alerted fall or stillness,
+            # and a watch warning otherwise. Once up for 3 s the floor alert clears.
+            concern = None
+            if result['quality'] == 'good':
+                down = features.get('posture') == 'lying' and not features.get('in_bed')
+                if down:
+                    state.pop('up_since', None)
+                else:
+                    state['up_since'] = state.get('up_since') or frame.timestamp
+                    if frame.timestamp - state['up_since'] >= 3:
+                        state.pop('floor_alert_id', None)
+                concern = ('on_floor' if down and state.get('floor_alert_id') else
+                           next(iter(alerted), None) or ('on_floor_watch' if down else None))
             cached['state'] = dict(state)
             if alerted:
                 # Persist the incident link now (not at checkpoint cadence) so a restart
@@ -360,11 +369,6 @@ class Guardian:
                 row = s.get(Stream, stream_id)
                 if row is not None:
                     row.state = cached['state']
-            concern = None
-            if result['quality'] == 'good':
-                down = features.get('posture') == 'lying' and not features.get('in_bed') and state.get('fall_seen')
-                concern = ('on_floor' if down and state.get('floor_alert_id') else
-                           next(iter(alerted), None) or ('on_floor_watch' if down else None))
             active_events = list(active_by_rule.values())
             if result['quality'] == 'good':
                 # Keep collecting evidence only for incidents still in progress; a

@@ -23,6 +23,10 @@ import { TriageProgress } from "./TriageProgress";
 import { PoseStabilizer } from "./poseFilter";
 import { urgencyNames } from "./EventDetail";
 
+// Uploaded clips are analysed at a fixed rate of video time, whatever the machine's
+// speed, so every computer scores the same frames and none are skipped.
+const UPLOAD_STEP_SECONDS = 1 / 12;
+
 const CONCERN_NAMES: Record<string, string> = {
   fall: "Possible fall",
   restricted_standing: "Standing during restricted hours",
@@ -49,13 +53,16 @@ const clipTime = (seconds: number) => {
 // between two readings does not make the status card flicker.
 function useSteady(key: string, holdMs: number, immediate: boolean) {
   const [shown, setShown] = useState(key);
+  // A new alert shows at once; switching between two alert messages is held like
+  // any other change, so tracking blips do not make it flicker.
+  const now = immediate || (key.startsWith("alert|") && !shown.startsWith("alert|"));
   useEffect(() => {
     if (key === shown) return;
-    if (immediate) { setShown(key); return; }
+    if (now) { setShown(key); return; }
     const timer = setTimeout(() => setShown(key), holdMs);
     return () => clearTimeout(timer);
-  }, [key, shown, holdMs, immediate]);
-  return immediate ? key : shown;
+  }, [key, shown, holdMs, now]);
+  return now ? key : shown;
 }
 function personBounds(landmarks: Landmark[]) {
   const visible = landmarks.filter((point) =>
@@ -125,6 +132,7 @@ export function Capture({
   const active = useRef(false),
     busy = useRef(false),
     raf = useRef(0),
+    playStart = useRef(0),
     sock = useRef<ReturnType<typeof connectPose> | null>(null);
   const lost = useRef(false);
   const seenEventIds = useRef(new Set<string>());
@@ -145,7 +153,7 @@ export function Capture({
   const stop = () => {
     runId.current += 1;
     active.current = false;
-    cancelAnimationFrame(raf.current);
+    window.clearTimeout(raf.current);
     sock.current?.close();
     sock.current = null;
     worker.current?.terminate();
@@ -240,7 +248,7 @@ export function Capture({
     if (sourceRef.current !== "upload" || finishing.current) return;
     finishing.current = true;
     active.current = false;
-    cancelAnimationFrame(raf.current);
+    window.clearTimeout(raf.current);
     const thisRun = runId.current;
     setRunning(false);
     setVerdictBusy(true);
@@ -328,12 +336,15 @@ export function Capture({
         }
         if (event.data.type === "ready") {
           setStatus(file ? "Analyzing video · waiting for person" : "Select the person to monitor");
-          if (file) void element.play();
-          loop();
+          if (file) {
+            playStart.current = performance.now();
+            element.currentTime = 0.001; // the seek triggers the first capture
+          } else loop();
           return;
         }
         if (event.data.type !== "poses") return;
         busy.current = false;
+        if (sourceRef.current === "upload") advanceUpload();
         const detected: Landmark[][] = event.data.poses.map((p: Landmark[]) =>
           p.map((l) => ({
             x: l.x,
@@ -369,13 +380,39 @@ export function Capture({
         if (sock.current.send(frame) && sourceRef.current === "upload") recordedFrames.current.push(frame);
       };
       worker.current.postMessage({ type: "init" });
-      const loop = async () => {
+      // Uploads: step through the clip one analysed frame at a time. Playback never
+      // runs ahead of analysis (or faster than real time), so a slow machine or a
+      // covered window only makes it take longer instead of skipping frames.
+      const captureUpload = async () => {
+        if (!active.current || busy.current) return;
+        busy.current = true;
+        lastVideoTime.current = element.currentTime;
+        captureTime.current = replayTime.current + element.currentTime;
+        try {
+          const bitmap = await createImageBitmap(element);
+          worker.current?.postMessage({ type: "frame", bitmap, timestamp: performance.now() }, [bitmap]);
+        } catch {
+          busy.current = false;
+          advanceUpload();
+        }
+      };
+      const advanceUpload = () => {
         if (!active.current) return;
-        if (element.ended) {
+        const next = lastVideoTime.current + UPLOAD_STEP_SECONDS;
+        if (next >= element.duration) {
           active.current = false;
           void finishUpload();
           return;
         }
+        const wait = playStart.current + next * 1000 - performance.now();
+        raf.current = window.setTimeout(() => { element.currentTime = next; }, Math.max(0, wait));
+      };
+      element.onseeked = () => {
+        if (sourceRef.current === "upload") void captureUpload();
+      };
+      // Live camera: analyse the newest frame whenever the worker is free.
+      const loop = async () => {
+        if (!active.current) return;
         if (
           !busy.current &&
           element.readyState >= 2 &&
@@ -385,9 +422,7 @@ export function Capture({
           lastVideoTime.current = element.currentTime;
           // Stamp the frame when it is captured, not when inference returns,
           // so joint speeds are measured on the real frame spacing.
-          captureTime.current = sourceRef.current === "live"
-            ? Date.now() / 1000
-            : replayTime.current + element.currentTime;
+          captureTime.current = Date.now() / 1000;
           try {
             const bitmap = await createImageBitmap(element);
             worker.current?.postMessage(
@@ -398,7 +433,9 @@ export function Capture({
             busy.current = false;
           }
         }
-        raf.current = requestAnimationFrame(loop);
+        // A timer, not requestAnimationFrame: the browser stops animation frames
+        // whenever the page is not being drawn, which silently halted analysis.
+        raf.current = window.setTimeout(loop, 30);
       };
     } catch (e) {
       stop();
@@ -431,6 +468,9 @@ export function Capture({
   const loggedNote = `${logged} alert${logged === 1 ? "" : "s"} logged below.`;
   if (preview && people > 1 && !verdict) {
     signal = { kind: "warning", title: "One person only", detail: "Clear the room before monitoring continues." };
+  } else if (concern === "on_floor" && (lost.current || result?.quality === "uncertain")) {
+    // Out of clear view since the last reading on the floor: keep the alert, but say so.
+    signal = { kind: "alert", title: "Last seen on the floor", detail: "Lost clear view of them after the fall. Check on them." };
   } else if (concern === "on_floor") {
     signal = { kind: "alert", title: "Person is on the floor", detail: verdict
       ? "The video ended with them still down after the fall." : "Down since the fall and not up yet." };
@@ -460,7 +500,7 @@ export function Capture({
   }
   const signalKey = `${signal.kind}|${signal.title}`;
   signals.current.set(signalKey, signal);
-  const shownKey = useSteady(signalKey, 700, signal.kind === "alert" || verdictBusy || Boolean(verdict) || !preview);
+  const shownKey = useSteady(signalKey, 700, verdictBusy || Boolean(verdict) || !preview);
   const shown = signals.current.get(shownKey) ?? signal;
   const geminiBlocker = !config.gemini_configured ? "No API key on server"
     : !config.gemini_billed_project_confirmed ? "Billing not confirmed on server" : undefined;

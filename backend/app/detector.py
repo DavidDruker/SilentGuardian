@@ -16,7 +16,8 @@ BRIEF_DROPOUT_SECONDS = .5
 FALL_HIP_DROP_TORSO_RATIO = .35
 # Upright, then lying on the floor this soon after, is a fall even when the image
 # shows little hip drop (a handheld camera following the person cancels it out).
-FALL_TRANSITION_SECONDS = 2.5
+# Tracking often drops out during the fall itself, hence the generous window.
+FALL_TRANSITION_SECONDS = 3.5
 # At least 7 of the 9 key joints. Wrists and ankles are often hidden mid-fall.
 MIN_KEY_VISIBILITY = 7/9
 
@@ -31,11 +32,17 @@ def quiet_hours(profile, timestamp):
     return a <= hour < b if a < b else hour >= a or hour < b
 
 
-def classify_posture(angle, height, width, torso, previous=None, inverted=False, head_down=False):
+def classify_posture(angle, height, width, torso, previous=None, inverted=False, head_down=False, feet_below=False):
     # Shoulders below the hips with the feet above them is someone lying along the
     # camera's line of sight (e.g. face-down toward it). The torso then looks
     # vertical, so the angle test alone would call them standing.
     if inverted:
+        return 'lying'
+    # Much wider than tall is someone spread out on the floor, even when
+    # foreshortening makes the torso angle meaningless (face-down toward the camera).
+    # Not when the feet are well below the hips, or the body is cut off by the frame:
+    # that is an upright person close to the camera with only the head and shoulders in view.
+    if (previous == 'lying' and width > height * 1.2) or (not feet_below and width > height * 1.5):
         return 'lying'
     # Hysteresis: keep the previous posture until the reading clearly leaves it, so a
     # body near a threshold does not flicker between postures (and reset timers).
@@ -68,16 +75,22 @@ def sample(frame: PoseFrame, profile: Profile, previous_posture=None):
         return None
     hip = midpoint(points, 23, 24)
     shoulder = midpoint(points, 11, 12)
-    torso = math.dist(hip, shoulder)
-    if torso < .045:
-        return None
-    angle = math.degrees(math.atan2(abs(hip[0] - shoulder[0]), abs(hip[1] - shoulder[1])))
     height = max(p.y for p in points) - min(p.y for p in points)
     width = max(p.x for p in points) - min(p.x for p in points)
+    if max(height, width) < .06:
+        return None  # too small in the frame to judge
+    # Someone lying along the camera's line of sight has a foreshortened torso, so the
+    # body scale never drops below a third of the body's extent in the image.
+    torso = max(math.dist(hip, shoulder), max(height, width) / 3)
+    angle = math.degrees(math.atan2(abs(hip[0] - shoulder[0]), abs(hip[1] - shoulder[1])))
     ankle_y = (points[27].y + points[28].y) / 2
     head_down = shoulder[1] > hip[1] + .15 * torso
+    # Invisible ankles are placed arbitrarily (often at the frame edge), and hips at the
+    # bottom edge mean the legs are out of frame; the outline is then cut off, not wide.
+    legs_in_view = max(points[27].visibility, points[28].visibility) >= .1 and hip[1] <= .9
     posture = classify_posture(angle, height, width, torso, previous_posture,
-                               inverted=head_down and ankle_y < hip[1], head_down=head_down)
+                               inverted=head_down and legs_in_view and ankle_y < hip[1], head_down=head_down,
+                               feet_below=not legs_in_view or ankle_y > hip[1] + .5 * torso)
     zone = profile.bed_zone
     in_bed = bool(zone and zone.x1 <= hip[0] <= zone.x2 and zone.y1 <= hip[1] <= zone.y2)
     helper = False
@@ -114,7 +127,7 @@ def evaluate(frame: PoseFrame, profile: Profile, state: dict):
         # stillness timer through at most BRIDGE_SECONDS of low-visibility frames; the
         # next good frame confirms it (same place, still on the floor) or resets it.
         gap_from = state.get('gap_from') or (state['samples'][-1]['t'] if state.get('samples') else t)
-        keep = state.get('fall_seen') and state.get('still_since') is not None and t - gap_from <= BRIDGE_SECONDS
+        keep = state.get('still_since') is not None and t - gap_from <= BRIDGE_SECONDS
         state.update(samples=[], sway_since=None, recovery_since=None, last_good=None, gap_from=gap_from, posture=None)
         if not keep:
             state.update(still_since=None, still_anchor=None)
@@ -164,7 +177,8 @@ def evaluate(frame: PoseFrame, profile: Profile, state: dict):
     still = on_floor and len(recent) >= 3 and max(math.dist((s['x'],s['y']), (current['x'],current['y'])) / scale for s in recent) < .04 and all(np.linalg.norm(np.array(s['vector'])-np.array(current['vector'])) < .3 for s in recent)
     # Right after a bridged gap there are too few samples to judge stillness; hold the timer.
     settling = state.get('bridged') and on_floor and len(recent) < 3
-    if still and state.get('fall_seen'):
+    # Motionless on the floor counts whether or not the fall itself was seen.
+    if still:
         state['still_since'] = state.get('still_since') or t
         state.update(still_anchor=(current['x'], current['y']), bridged=False)
     elif not settling:

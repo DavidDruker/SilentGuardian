@@ -22,7 +22,9 @@ class Settings(BaseSettings):
     internal_service_token: str = 'local-internal-demo-token'
     # Rules flag candidates generously; the ML decides which become alerts.
     decision_mode: str = 'enforce'
-    fall_score_threshold: float = .4
+    # Staged falls scored 0.72 (close) and 0.34 (far, partly tracked); the model is only
+    # asked about fall candidates, where walking and stumbles scored 0.00-0.04.
+    fall_score_threshold: float = .25
     model_timeout_seconds: float = 2
     personalization_previous_weight: float = .8
     personalization_timezone: str = 'America/Toronto'
