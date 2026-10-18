@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Camera,
+  CircleCheck,
+  CircleX,
   FileVideo,
   Pause,
+  TriangleAlert,
 } from "lucide-react";
 import {
   api,
@@ -15,12 +18,31 @@ import {
   type Profile,
   uid,
 } from "./api";
-import { Skeleton } from "./Skeleton";
-
 const center = (p: Landmark[]) => ({
   x: (p[23].x + p[24].x) / 2,
   y: (p[23].y + p[24].y) / 2,
 });
+
+function personBounds(landmarks: Landmark[]) {
+  const visible = landmarks.filter((point) =>
+    point.visibility >= 0.35 && Number.isFinite(point.x) && Number.isFinite(point.y) &&
+    point.x >= 0 && point.x <= 1 && point.y >= 0 && point.y <= 1,
+  );
+  if (visible.length < 5) return null;
+  const left = Math.max(0, Math.min(...visible.map((point) => point.x)) - 0.035);
+  const right = Math.min(1, Math.max(...visible.map((point) => point.x)) + 0.035);
+  const top = Math.max(0, Math.min(...visible.map((point) => point.y)) - 0.035);
+  const bottom = Math.min(1, Math.max(...visible.map((point) => point.y)) + 0.035);
+  if (right - left < 0.08 || bottom - top < 0.15) return null;
+  return { left: `${left * 100}%`, top: `${top * 100}%`, width: `${(right - left) * 100}%`, height: `${(bottom - top) * 100}%` };
+}
+
+type SignalKind = "good" | "warning" | "alert";
+function SignalIcon({ kind, size = 22 }: { kind: SignalKind; size?: number }) {
+  if (kind === "good") return <CircleCheck size={size} aria-hidden="true" />;
+  if (kind === "alert") return <CircleX size={size} aria-hidden="true" />;
+  return <TriangleAlert size={size} aria-hidden="true" />;
+}
 
 type CaptureResult = {
   status: "reviewing" | "uncertain" | "ready";
@@ -52,6 +74,7 @@ export function Capture({
   const [videoAspect, setVideoAspect] = useState(0);
   const [verdict, setVerdict] = useState<CaptureResult | null>(null);
   const [verdictBusy, setVerdictBusy] = useState(false);
+  const [activeAlert, setActiveAlert] = useState(false);
   const video = useRef<HTMLVideoElement>(null),
     worker = useRef<Worker | null>(null),
     media = useRef<MediaStream | null>(null);
@@ -112,6 +135,7 @@ export function Capture({
     setFileName("");
     setVerdict(null);
     setVerdictBusy(false);
+    setActiveAlert(false);
     setVideoAspect(0);
     selectedRef.current = false;
     finishing.current = false;
@@ -133,7 +157,7 @@ export function Capture({
     sock.current?.close();
     sock.current = connectPose((r) => {
       if (r.quality !== "buffering") setResult(r);
-      if (r.event_id) onEvent();
+      if (r.event_id) { setActiveAlert(true); onEvent(); }
     }, setStatus);
   };
   const choose = (index: number) => {
@@ -156,7 +180,7 @@ export function Capture({
     const thisRun = runId.current;
     setRunning(false);
     setVerdictBusy(true);
-    setStatus("Video complete · preparing verdict");
+    setStatus("Video complete · preparing analysis");
     // Let the last MediaPipe frame and its WebSocket response finish before querying.
     for (let i = 0; busy.current && i < 20; i++)
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -175,13 +199,13 @@ export function Capture({
       }
       if (runId.current === thisRun) {
         setVerdictBusy(false);
-        setStatus(last?.status === "reviewing" ? "Context review still pending" : last?.status === "uncertain" ? "Movement needs review" : "Verdict ready");
+        setStatus(last?.status === "reviewing" ? "Review still in progress" : last?.status === "uncertain" ? "Movement needs review" : "Analysis complete");
         onEvent();
       }
     } catch (cause) {
       if (runId.current === thisRun) {
         setVerdictBusy(false);
-        onError(`Could not load the upload verdict: ${String(cause)}`);
+        onError(`Could not finish analyzing the video: ${String(cause)}`);
       }
     }
   };
@@ -192,7 +216,7 @@ export function Capture({
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `hayvn-skeleton-${session.current}.json`;
+    link.download = `hayvn-movement-${session.current}.json`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
@@ -201,7 +225,7 @@ export function Capture({
     session.current = uid();
     setResult(null);
     try {
-      setStatus("Loading local pose model…");
+      setStatus("Preparing video analysis…");
       setSource(file ? "Uploaded video" : "Live camera");
       setFileName(file?.name || "");
       sourceRef.current = file ? "upload" : "live";
@@ -231,7 +255,7 @@ export function Capture({
       worker.current = new Worker("/pose-worker.js");
       worker.current.onmessage = (event) => {
         if (event.data.type === "error") {
-          onError("Pose model failed. " + event.data.error);
+          onError("Video analysis failed. " + event.data.error);
           stop();
           return;
         }
@@ -355,6 +379,28 @@ export function Capture({
   const trunk = result?.features?.trunk_angle,
     helper = result?.features?.helper_present,
     still = result?.features?.still_seconds;
+  let signal: { kind: SignalKind; title: string; detail: string } = {
+    kind: "warning", title: "Checking movement", detail: "Keep the person clearly in view.",
+  };
+  if (activeAlert || verdict?.event) {
+    signal = { kind: "alert", title: "Concern detected", detail: "Review the alert details below." };
+  } else if (verdictBusy && !verdict) {
+    signal = { kind: "warning", title: "Reviewing video", detail: "Checking the recorded movement." };
+  } else if (verdict?.status === "uncertain" || verdict?.status === "reviewing" || (verdict && !verdict.scored_windows)) {
+    signal = { kind: "warning", title: "Result uncertain", detail: "Try a clearer video with the person fully visible." };
+  } else if (verdict?.status === "ready") {
+    signal = { kind: "good", title: "No concern detected", detail: "No alert was triggered in this video." };
+  } else if (status.includes("Reconnecting") || status.includes("interrupted") || status.includes("expired")) {
+    signal = { kind: "warning", title: "Connection interrupted", detail: "Monitoring may be paused." };
+  } else if (lost.current) {
+    signal = { kind: "warning", title: "Person not identified", detail: "Select the person again to continue." };
+  } else if (!selectedRef.current) {
+    signal = { kind: "warning", title: "Select a person", detail: "Choose who to monitor in the video." };
+  } else if (result?.quality === "uncertain" || result?.rule_hits?.length) {
+    signal = { kind: "warning", title: "Movement uncertain", detail: "Continue monitoring for a clearer reading." };
+  } else if (result?.quality === "good" && result.accepted) {
+    signal = { kind: "good", title: "No concern detected", detail: "The person is identified and monitoring is active." };
+  }
   return (
     <section className="panel capture-panel">
       <div className="panel-heading">
@@ -378,9 +424,16 @@ export function Capture({
           onEnded={() => void finishUpload()}
         />
         {!preview && <div className="room-grid" />}
-        {poses.length > 0 ? (
-          <Skeleton poses={poses} selected={selected < 0 ? 0 : selected} />
-        ) : (
+        {preview && poses.map((pose, index) => {
+          const bounds = personBounds(pose);
+          if (!bounds) return null;
+          const identified = selectedRef.current && !lost.current && selected === index;
+          return <div key={index} className={`person-tracking-box ${identified ? "identified" : "candidate"}`}
+            style={bounds} aria-hidden="true">
+            <span>{identified ? "Identified" : `Person ${index + 1}`}</span>
+          </div>;
+        })}
+        {!preview && poses.length === 0 && (
           <div className="camera-empty">
             <div className="camera-icon">
               <Camera size={32} />
@@ -395,16 +448,10 @@ export function Capture({
             {source || "Capture device"}
           </span>
         </div>
-        <div className="camera-bottom">
-          <span>{status}</span>
-          <span>
-            {result?.quality === "good"
-              ? "Pose quality: good"
-              : result?.quality === "uncertain"
-                ? "Pose quality: uncertain"
-                : "Waiting for movement"}
-          </span>
-        </div>
+        {preview && <div className={`camera-analysis-status status-${signal.kind}`} role="status" aria-live="polite">
+          <SignalIcon kind={signal.kind} />
+          <div><strong>{signal.title}</strong><span>{signal.detail}</span></div>
+        </div>}
       </div>
       {preview && poses.length > 0 && (sourceRef.current === "live" || (!selectedRef.current && poses.length > 1)) && (
         <div className="select-person">
@@ -442,18 +489,13 @@ export function Capture({
           />
         </label>
       </div>
-      {fileName && <p className="capture-file">{fileName} · Video stays in this browser; pose landmarks are analyzed.</p>}
-      {(verdictBusy || verdict) && <section className="capture-verdict" aria-live="polite">
-        <span className="eyebrow">VIDEO VERDICT</span>
-        {verdictBusy && !verdict && <h3>Reviewing detected movement…</h3>}
-        {verdict?.event ? <>
-          <h3>{verdict.event.summary}</h3>
-          <p>Rule: {verdict.event.rule_hits.join(", ") || "none"} · Urgency level {verdict.event.urgency} · {verdict.status === "reviewing" ? "Context review pending" : verdict.event.verdict_status.replaceAll("_", " ")}</p>
-        </> : verdict && <>
-          <h3>{verdict.status === "uncertain" ? "Movement needs review" : verdict.scored_windows ? "No alert triggered by this video" : "No usable pose detected"}</h3>
-          <p>{verdict.status === "uncertain" ? `A rule candidate was held because ${verdict.decision_reason?.replaceAll("_", " ") || "the evidence was uncertain"}.` : verdict.scored_windows ? `${verdict.scored_windows} pose windows were scored${verdict.candidate_decision === "rejected" ? "; the model did not support the rule trigger" : ""}. This is a demo assessment, not a safety guarantee.` : "Try a clip where the full body is visible throughout the movement."}</p>
-        </>}
-        {verdict && recordedFrames.current.length > 0 && <button className="secondary small" onClick={exportSkeleton}>Download skeleton evidence</button>}
+      {fileName && <p className="capture-file">{fileName} · Video stays in this browser while movement is analyzed.</p>}
+      {(verdictBusy || verdict) && <section className={`capture-verdict status-${signal.kind}`} aria-live="polite">
+        <div className="capture-verdict-heading"><SignalIcon kind={signal.kind} size={28} />
+          <div><span className="eyebrow">VIDEO ANALYSIS</span><h3>{verdict?.event?.summary || signal.title}</h3></div>
+        </div>
+        <p>{signal.detail}</p>
+        {verdict && recordedFrames.current.length > 0 && <button className="secondary small" onClick={exportSkeleton}>Download movement data</button>}
       </section>}
       <div className="feature-strip">
         <div>

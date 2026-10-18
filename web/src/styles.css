@@ -617,16 +617,33 @@ nav button.active {
 .camera-video.visible {
   display: block;
 }
-.skeleton {
+.person-tracking-box {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+  box-sizing: border-box;
+  border-radius: 2px;
+  transition: left 100ms linear, top 100ms linear, width 100ms linear, height 100ms linear;
 }
-.skeleton text {
-  font-family: var(--font);
-  font-weight: 600;
+.person-tracking-box.identified {
+  border: 2px solid #f24a52;
+  box-shadow: 0 0 0 1px rgb(18 28 43 / 30%), 0 0 9px rgb(242 74 82 / 30%);
 }
+.person-tracking-box.candidate {
+  border: 1px dashed rgb(255 255 255 / 75%);
+}
+.person-tracking-box > span {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 2px 5px;
+  background: #f24a52;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.person-tracking-box.candidate > span { background: rgb(15 29 49 / 82%); }
 .camera-empty {
   position: absolute;
   inset: 0;
@@ -653,17 +670,15 @@ nav button.active {
   line-height: 1.6;
   color: var(--sky-light);
 }
-.camera-top,
-.camera-bottom {
+.camera-top {
   position: absolute;
+  z-index: 3;
   left: 16px;
   right: 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-}
-.camera-top {
   top: 14px;
 }
 .camera-label {
@@ -680,17 +695,26 @@ nav button.active {
 .camera-label .dot {
   display: none;
 }
-.camera-bottom {
+.camera-analysis-status {
+  position: absolute;
+  z-index: 3;
+  left: 16px;
+  right: 16px;
   bottom: 14px;
-  padding: 6px 8px;
-  background: rgb(15 29 49 / 0.85);
-  color: var(--white);
-  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-left: 3px solid currentColor;
+  background: rgb(15 29 49 / 88%);
+  color: #f5c85d;
 }
-.camera-bottom > span:last-child {
-  color: var(--sky-light);
-  text-align: right;
-}
+.camera-analysis-status.status-good { color: #56d895; }
+.camera-analysis-status.status-alert { color: #ff696e; }
+.camera-analysis-status svg { flex: none; }
+.camera-analysis-status > div { display: grid; gap: 1px; }
+.camera-analysis-status strong { color: #fff; font-size: 14px; }
+.camera-analysis-status span { color: #d9e1eb; font-size: 12px; }
 .roi-mask {
   position: absolute;
   z-index: 2;

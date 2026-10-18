@@ -119,7 +119,7 @@
 }
 .mvp-workspace .camera-video {
   object-fit: fill;
-  opacity: .72;
+  opacity: .9;
 }
 .capture-file {
   margin: 10px 0 0;
@@ -133,8 +133,16 @@
   border: 1px solid var(--line);
   background: var(--sky-soft);
 }
-.capture-verdict h3 { margin: 8px 0; }
-.capture-verdict p { margin: 0 0 12px; }
+.capture-verdict.status-good { border-color: #b8e5ce; background: #eef9f2; }
+.capture-verdict.status-warning { border-color: #f0d68f; background: #fff9e9; }
+.capture-verdict.status-alert { border-color: #f1b6b7; background: #fff1f1; }
+.capture-verdict-heading { display: flex; align-items: center; gap: 12px; }
+.capture-verdict-heading svg { flex: none; }
+.capture-verdict.status-good .capture-verdict-heading svg { color: #218458; }
+.capture-verdict.status-warning .capture-verdict-heading svg { color: #a57414; }
+.capture-verdict.status-alert .capture-verdict-heading svg { color: #c9343c; }
+.capture-verdict h3 { margin: 5px 0 0; }
+.capture-verdict p { margin: 12px 0; }
 .activity-calendar-panel { min-width: 0; }
 .activity-calendar-scroll { overflow-x: auto; padding: 10px 0 14px; }
 .activity-calendar { width: max-content; padding: 4px 10px 10px 0; }
