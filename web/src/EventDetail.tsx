@@ -33,7 +33,6 @@ export function EventDetail({
   const features = event.features;
   if (features.posture != null) metrics.push(["Posture", pretty(String(features.posture))]);
   if (features.trunk_angle != null) metrics.push(["Trunk angle", `${features.trunk_angle}°`]);
-  if (features.still_seconds != null) metrics.push(["Still for", `${features.still_seconds} s`]);
   if (typeof features.helper_present === "boolean") metrics.push(["Helper nearby", features.helper_present ? "Yes" : "No"]);
   if (typeof features.visibility === "number") metrics.push(["Visibility", `${Math.round(features.visibility * 100)}%`]);
   if (typeof features.anomaly_score === "number") metrics.push(["Baseline change score", features.anomaly_score.toFixed(1)]);

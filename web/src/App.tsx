@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight, Settings2, X } from "lucide-react";
+import { ChevronRight, Settings2, UserRound, X } from "lucide-react";
 import { api, type AppConfig, type GuardianEvent, type Profile } from "./api";
 import { Capture } from "./Capture";
 import { ProfileEditor } from "./ProfileEditor";
 import { EventDetail, pretty, timeLabel, urgencyNames } from "./EventDetail";
 import { ContactView } from "./ContactView";
 import { Activity } from "./Activity";
-import { demoAlerts } from "./demo-data";
 
 type Monitoring = { person_id: string; quality: string; online: boolean };
 type Mode = "care" | "personal";
@@ -30,6 +29,7 @@ export default function App() {
   const [monitoring, setMonitoring] = useState<Monitoring[]>([]);
   const [mode, setMode] = useState<Mode>(remembered("mode") === "care" ? "care" : "personal");
   const [personId, setPersonId] = useState(remembered("person"));
+  const [careOpen, setCareOpen] = useState(false);
   const restored = useRef(false);
   const [logged, setLogged] = useState(false);
   const [token, setToken] = useState("");
@@ -37,6 +37,7 @@ export default function App() {
   const [page, setPage] = useState<"overview" | "events" | "activity">("overview");
   const [editing, setEditing] = useState<"new" | "existing" | null>(null);
   const [detail, setDetail] = useState<string | null>(null);
+  const [detailEvent, setDetailEvent] = useState<GuardianEvent | null>(null);
   const [hash, setHash] = useState(location.hash);
 
   useEffect(() => {
@@ -48,10 +49,15 @@ export default function App() {
   const refresh = useCallback(async () => {
     try {
       const people = await api<Profile[]>("/profiles");
-      setProfiles(people.filter(visibleProfile));
+      const visible = people.filter(visibleProfile);
+      setProfiles(visible);
       setLogged(true);
+      const selectedId = mode === "care"
+        ? careOpen ? personId : ""
+        : visible.find((person) => person.id === personId && person.mode === "personal")?.id
+          ?? visible.find((person) => person.mode === "personal")?.id;
       const [history, streams] = await Promise.allSettled([
-        api<GuardianEvent[]>("/events"),
+        selectedId ? api<GuardianEvent[]>(`/events?person_id=${encodeURIComponent(selectedId)}`) : Promise.resolve([]),
         api<Monitoring[]>("/monitoring"),
       ]);
       if (history.status === "fulfilled") { setEvents(history.value); setFeedError(""); }
@@ -61,12 +67,20 @@ export default function App() {
       if (String(cause).includes("Sign in")) setLogged(false);
       else setError(String(cause));
     }
-  }, []);
+  }, [mode, personId, careOpen]);
 
   useEffect(() => {
     void api<AppConfig>("/config").then(setConfig).catch((cause) => setError(String(cause)));
     if (!location.hash.startsWith("#contact/")) void refresh();
   }, [refresh]);
+  useEffect(() => {
+    if (!detail) { setDetailEvent(null); return; }
+    let cancelled = false;
+    void api<GuardianEvent>(`/events/${encodeURIComponent(detail)}`)
+      .then((event) => { if (!cancelled) setDetailEvent(event); })
+      .catch((cause) => { if (!cancelled) setError(String(cause)); });
+    return () => { cancelled = true; };
+  }, [detail]);
   useEffect(() => {
     if (!logged || hash.startsWith("#contact/")) return;
     // Schedule the next poll only after the previous one finishes, so slow
@@ -93,8 +107,10 @@ export default function App() {
   }, [profiles, personId, mode]);
 
   const inMode = profiles.filter((person) => person.mode === mode);
-  const profile = inMode.find((person) => person.id === personId) ?? inMode[0];
-  const sampleAlerts = profile ? demoAlerts(profile) : [];
+  const profile = mode === "care"
+    ? careOpen ? inMode.find((person) => person.id === personId) : undefined
+    : inMode.find((person) => person.id === personId) ?? inMode[0];
+  const showingCareProfiles = mode === "care" && !careOpen && inMode.length > 0;
   const profileIds = new Set(profiles.map((person) => person.id));
   const visibleEvents = events.filter((event) => profileIds.has(event.person_id) && event.source !== "demo_call");
   const current = visibleEvents.filter((event) => event.person_id === profile?.id);
@@ -104,9 +120,9 @@ export default function App() {
   const checkIn = mode === "personal" && profile?.check_in_first
     ? open.find((event) => event.urgency === 1)
     : undefined;
-  const recent = [...current].sort((a, b) => b.opened_at - a.opened_at).slice(0, 4);
+  const recent = [...current].sort((a, b) => b.opened_at - a.opened_at);
   const sorted = page === "events"
-    ? [...recent, ...sampleAlerts.slice(0, 4 - recent.length)].sort((a, b) => b.opened_at - a.opened_at)
+    ? recent
     : [...open].sort((a, b) => b.urgency - a.urgency || b.opened_at - a.opened_at);
 
   const login = async (event: React.FormEvent) => {
@@ -152,7 +168,7 @@ export default function App() {
     </main>
   );
 
-  const selectedEvent = [...visibleEvents, ...sampleAlerts].find((event) => event.id === detail);
+  const selectedEvent = detailEvent?.id === detail ? detailEvent : visibleEvents.find((event) => event.id === detail);
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -162,7 +178,7 @@ export default function App() {
         <div className="mode-switch" aria-label="Workspace mode">
           {(["personal", "care"] as const).map((value) => (
             <button key={value} className={mode === value ? "selected" : ""}
-              onClick={() => { setMode(value); setPersonId(""); setPage("overview"); }}>
+              onClick={() => { setMode(value); setPersonId(""); setCareOpen(false); setPage("overview"); }}>
               {value === "personal" ? "Personal" : "Care"}
             </button>
           ))}
@@ -189,20 +205,29 @@ export default function App() {
               <span className="eyebrow">{mode === "care" ? "CARE MONITORING" : "PERSONAL MONITORING"}</span>
               <h1>{page === "overview" ? "Overview" : page === "events" ? "Alerts" : "Activity"}</h1>
             </div>
-            <div className="heading-actions">
-              {inMode.length > 1 && <select aria-label="Selected person" value={profile?.id || ""}
+            <div className={`heading-actions${mode === "care" ? " care-actions" : ""}`}>
+              {mode === "care" && careOpen && <button className="secondary" onClick={() => { setCareOpen(false); setPage("overview"); }}>All profiles</button>}
+              {profile && inMode.length > 1 && <select aria-label="Selected person" value={profile.id}
                 onChange={(event) => setPersonId(event.target.value)}>
                 {inMode.map((person) => <option key={person.id} value={person.id}>{person.alias}</option>)}
               </select>}
               {profile && <button className="secondary" onClick={() => setEditing("existing")}><Settings2 size={16} /> Edit profile</button>}
-              <button className="primary" onClick={() => setEditing("new")}>{profile ? "Add person" : "Create profile"}</button>
+              <button className="primary" onClick={() => setEditing("new")}>{inMode.length ? "Add person" : "Create profile"}</button>
             </div>
           </div>
           {error && <div className="banner error" role="alert"><span>{error}</span>
             <button className="icon-button" onClick={() => setError("")} aria-label="Dismiss error"><X size={16} /></button>
           </div>}
           {feedError && page === "overview" && <div className="banner" role="status">{feedError}</div>}
-          {!profile ? (
+          {showingCareProfiles ? (
+            <div className="care-profiles" aria-label="Care profiles">
+              {inMode.map((person) => <button className="care-profile-card" key={person.id} type="button"
+                onClick={() => { setPersonId(person.id); setCareOpen(true); setPage("overview"); }}>
+                <span className="profile-avatar" aria-hidden="true"><UserRound size={56} strokeWidth={1.25} /></span>
+                <strong>{person.alias}</strong><ChevronRight size={18} className="profile-arrow" aria-hidden="true" />
+              </button>)}
+            </div>
+          ) : !profile ? (
             <section className="panel setup-empty">
               <h2>No {mode === "care" ? "residents" : "personal profile"} yet</h2>
               <p>Create a profile, then start the camera or select a video.</p>
@@ -222,7 +247,7 @@ export default function App() {
                 </div>
                 <Capture key={profile.id} profile={profile} config={config} onEvent={() => void refresh()} onError={setError} />
               </>}
-              {page === "activity" && <Activity key={profile.id} profile={profile} />}
+              {page === "activity" && <Activity key={profile.id} profile={profile} onOpenEvent={setDetail} />}
               {page !== "activity" &&
               <section className="panel recent-panel">
                 <div className="panel-heading"><h2>{page === "overview" ? "Open alerts" : "Recent alerts"}</h2>
@@ -247,6 +272,7 @@ export default function App() {
           setProfiles((current) => [...current.filter((person) => person.id !== saved.id), saved].filter(visibleProfile));
           setMode(saved.mode as Mode);
           setPersonId(saved.id);
+          setCareOpen(saved.mode === "care");
           void refresh();
         }} />}
       {selectedEvent && <EventDetail event={selectedEvent} profile={profile}

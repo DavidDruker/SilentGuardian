@@ -16,6 +16,29 @@ export type AppConfig = {
   ml_state?: string;
   decision_mode?: string;
 };
+export type ActivityIncident = {
+  id: string;
+  observed_at: number;
+  opened_at: number;
+  summary: string;
+  rules: string[];
+  source: string;
+  urgency: number;
+  status: string;
+  gemini_status: string;
+  stages: { ts: number; stage: string; outcome: string; urgency: number; details: Record<string, unknown> }[];
+};
+export type ActivityPage = {
+  total: number;
+  limit: number;
+  offset: number;
+  incidents: ActivityIncident[];
+};
+export type ActivityHeatmap = {
+  timezone: string;
+  meaning: string;
+  days: { day: string; hours: { hour: number; incidents: number; covered: boolean }[] }[];
+};
 
 export async function api<T>(
   path: string,
