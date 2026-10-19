@@ -9,7 +9,7 @@ from uuid import uuid4
 from sqlalchemy import delete, func, or_, select
 
 from .db import Audit, Candidate, Event, EventStage, Notification, Person, ProfileVersion, Stream, Window
-from .detector import evaluate
+from .detector import evaluate, sample
 from .baseline import BaselineEngine
 from .actions import ActionWorker
 from .schemas import EventOut, IngestResult, NotificationOut, Profile
@@ -194,22 +194,44 @@ class Guardian:
             if not p.consent:
                 raise ValueError('Monitoring consent is paused')
             cached = self.stream_state(s, stream_id, p.id)
+            if frame.timestamp <= cached['state'].get('last_timestamp', 0):
+                return IngestResult(accepted=False, reason='duplicate_or_out_of_order', quality='buffering')
+            observed = sample(frame, p)
+            signature = observed['identity'] if observed else None
+            previous_identity = cached['state'].get('identity_state')
+            identity_state = self.baseline.identity(s, p.id, signature, cached['state'], frame.timestamp)
+            if identity_state != previous_identity:
+                cached['saved_ts'] = None  # persist the transition even at camera rate
+            calibrating = p.id in self.calibrating
+            if identity_state in ('checking', 'mismatch') and not calibrating:
+                # A reviewed identity reference exists, but this stream has not
+                # passed it. Do not run rules, create alerts, or learn its motion.
+                cached['state'] = {key: value for key, value in cached['state'].items()
+                                   if key.startswith('identity_')}
+                cached['state']['last_timestamp'] = frame.timestamp
+                self.checkpoint_stream(s, stream_id, cached, frame.timestamp, now)
+                return IngestResult(accepted=True, reason='person_check',
+                                    quality='identity_mismatch' if identity_state == 'mismatch' else 'buffering',
+                                    identity_state=identity_state)
             state, result, reason = self.evaluate_rules(frame, p, cached['state'], stream_id)
             cached['state'] = state
             if result is None:
                 self.checkpoint_stream(s, stream_id, cached, frame.timestamp, now)
-                return IngestResult(accepted=reason != 'duplicate_or_out_of_order', reason=reason, quality='buffering')
+                return IngestResult(accepted=reason != 'duplicate_or_out_of_order', reason=reason, quality='buffering',
+                                    identity_state=identity_state)
             if result['quality'] == 'uncertain':
                 # Uncertain frames arrive at camera rate. Persist them at score cadence only.
                 if cached['uncertain_ts'] is not None and 0 <= frame.timestamp-cached['uncertain_ts'] < 1/3-.001:
                     self.checkpoint_stream(s, stream_id, cached, frame.timestamp, now)
-                    return IngestResult(accepted=True, reason=reason, quality='uncertain')
+                    return IngestResult(accepted=True, reason=reason, quality='uncertain', identity_state=identity_state)
                 cached['uncertain_ts'] = frame.timestamp
             features, hits = result['features'], result['rule_hits']
             samples = result['samples']
             window_ready = len(samples) >= 3 and samples[-1]['t']-samples[0]['t'] >= 1.8
             baseline = self.baseline.score(s, p.id, features) if window_ready else {
                 'score': None, 'anchor_score': None, 'contributions': [], 'state': 'warming up or uncertain', 'flag': False}
+            if identity_state != 'matched':
+                baseline['flag'] = False
             continuous = state.get('baseline_at') is not None and frame.timestamp-state['baseline_at'] <= .75
             state['baseline_count'] = (state.get('baseline_count', 0) if continuous else 0)+1 if baseline['flag'] and result['quality'] == 'good' else 0
             state['baseline_at'] = frame.timestamp
@@ -219,14 +241,23 @@ class Guardian:
                 hits.append('personal_baseline')
             features.update(anomaly_score=baseline['score'], anchor_score=baseline['anchor_score'],
                             baseline_posture=features.get('posture'),
+                            identity_state=identity_state,
                             demo_time_scale=frame.demo_time_scale,
-                            baseline_eligible=window_ready and not hits and not baseline['flag'] and result['quality'] == 'good',
+                            baseline_eligible=identity_state == 'matched' and
+                            frame.timestamp-state.get('identity_last_match_at', -1e20) <= 30 and
+                            window_ready and not hits and not baseline['flag'] and result['quality'] == 'good',
                             baseline_contributions_json=json.dumps(baseline['contributions']))
             # Persist at score cadence, including uncertain windows. No raw video is accepted.
             s.merge(Window(ts=datetime.fromtimestamp(frame.timestamp, timezone.utc), stream_id=stream_id, person_id=p.id,
-                           quality=features.get('visibility', 0), features=features, rule_hits=hits,
-                           calibration=p.id in self.calibrating and window_ready and not hits and result['quality'] == 'good',
+                           quality=features.get('visibility', 0),
+                           features={**features, 'identity_signature': signature}, rule_hits=hits,
+                           calibration=calibrating and window_ready and not hits and result['quality'] == 'good',
                            sequence=None))
+            if calibrating:
+                # Explicitly reviewed calibration is recorded without creating
+                # an incident or admitting its frames to automatic learning.
+                return IngestResult(accepted=True, reason='calibrating', quality=result['quality'],
+                                    features=features, identity_state='calibrating')
             recent_events = list(s.scalars(select(Event).where(
                 Event.stream_id == stream_id,
                 or_(Event.status.in_(('open', 'pending_review')),
@@ -391,7 +422,8 @@ class Guardian:
                                 event_ids=[ev.id for ev in active_events],
                                 anomaly_score=baseline['score'], anchor_score=baseline['anchor_score'],
                                 baseline_contributions=baseline['contributions'], baseline_state=baseline['state'],
-                                action_prediction=prediction, concern=concern, candidate_decision=decision)
+                                action_prediction=prediction, concern=concern, candidate_decision=decision,
+                                identity_state=identity_state)
 
     def queue(self, s, ev, now, repeat=False):
         if ev.status != 'open' or ev.urgency < 1:
@@ -482,10 +514,14 @@ class Guardian:
                 event.urgency, event.opened_at), reverse=True)
             candidate_filter = Candidate.event_id == events[0].id if events else Candidate.stream_id == stream_id
             candidate = s.scalar(select(Candidate).where(candidate_filter).order_by(Candidate.observed_at.desc()).limit(1))
+            stream = s.get(Stream, stream_id)
+            identity_state = stream.state.get('identity_state', 'not_enrolled') if stream else 'not_enrolled'
             return {'session_id': session_id, 'scored_windows': windows,
                     'status': 'reviewing' if any(event.status == 'pending_review' or event.verdict_status == 'pending'
                                                  for event in events) else
-                              'uncertain' if not events and candidate and candidate.decision == 'hold' else 'ready',
+                              'uncertain' if identity_state in ('mismatch', 'checking') or
+                              (not events and candidate and candidate.decision == 'hold') else 'ready',
+                    'identity_state': identity_state,
                     'candidate_decision': candidate.decision if candidate else None,
                     'decision_reason': candidate.reason if candidate else None,
                     'event': self.event_out(s, events[0]).model_dump() if events else None,

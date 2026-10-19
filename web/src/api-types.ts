@@ -833,6 +833,11 @@ export interface components {
              * @default uncalibrated
              */
             baseline_state: string;
+            /**
+             * Identity State
+             * @default not_enrolled
+             */
+            identity_state: string;
             /** Action Prediction */
             action_prediction?: {
                 [key: string]: unknown;

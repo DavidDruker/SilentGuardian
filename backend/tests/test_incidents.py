@@ -76,7 +76,8 @@ def test_gemini_can_raise_but_never_lower_urgency(guardian):
     worker.request = verdict(1)
     asyncio.run(worker.tick())
     lowered = guardian.events()[0]
-    assert lowered.verdict_status == 'validated' and lowered.urgency == 2
+    # Confirmed falls are Urgent even when Gemini proposes a lower level.
+    assert lowered.verdict_status == 'validated' and lowered.urgency == 3
     run(guardian, 'normal', guardian.clock()+10, 'other', 6)
     run(guardian, 'fall', guardian.clock()+16, 'other', 4)
     worker.request = verdict(3)

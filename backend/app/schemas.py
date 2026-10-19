@@ -215,6 +215,7 @@ class IngestResult(StrictModel):
     anchor_score: float | None = None
     baseline_contributions: list[dict] = Field(default_factory=list)
     baseline_state: str = 'uncalibrated'
+    identity_state: str = 'not_enrolled'
     action_prediction: dict | None = None
     # What is wrong right now, if anything: an alerted rule that is still firing,
     # 'on_floor' after an alerted fall, or 'on_floor_watch' after an unconfirmed drop.

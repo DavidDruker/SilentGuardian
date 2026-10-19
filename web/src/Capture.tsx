@@ -89,12 +89,14 @@ function SignalIcon({ kind, size = 22 }: { kind: SignalKind; size?: number }) {
 
 type CaptureResult = {
   status: "reviewing" | "uncertain" | "ready";
+  identity_state?: string;
   scored_windows: number;
   event: GuardianEvent | null;
   events: GuardianEvent[];
   candidate_decision: string | null;
   decision_reason: string | null;
 };
+type BaselineStatus = { recording: boolean; calibration_windows: number; evidence: { identity_anchor?: Record<string, number> } };
 
 export function Capture({
   profile,
@@ -124,6 +126,8 @@ export function Capture({
   const [alertLog, setAlertLog] = useState<GuardianEvent[]>([]);
   const [lastDecision, setLastDecision] = useState<string | null>(null);
   const [mlState, setMlState] = useState(config.ml_state ?? "");
+  const [baselineStatus, setBaselineStatus] = useState<BaselineStatus | null>(null);
+  const [calibrationBusy, setCalibrationBusy] = useState(false);
   // In-app notification shown when Gemini's verdict arrives.
   const [toast, setToast] = useState<GuardianEvent | null>(null);
   const toasted = useRef(new Set<string>());
@@ -200,9 +204,18 @@ export function Capture({
   };
   useEffect(() => () => stop(), []);
   useEffect(() => {
+    let current = true;
     stop();
     setResult(null);
     setSource("");
+    setBaselineStatus(null);
+    void api<BaselineStatus>(`/baseline/${profile.id}`).then((value) => {
+      if (current) setBaselineStatus(value);
+    }).catch(() => undefined);
+    return () => {
+      current = false;
+      void api(`/calibration/${profile.id}/stop`, "POST").catch(() => undefined);
+    };
   }, [profile.id]);
   useEffect(() => {
     if (!profile.consent) stop();
@@ -481,12 +494,38 @@ export function Capture({
       setConsentBusy(false);
     }
   };
+  const refreshBaseline = async () => {
+    setBaselineStatus(await api<BaselineStatus>(`/baseline/${profile.id}`));
+  };
+  const setCalibration = async (action: "start" | "stop") => {
+    setCalibrationBusy(true);
+    try {
+      await api(`/calibration/${profile.id}/${action}`, "POST");
+      await refreshBaseline();
+    } catch (error) { onError(String(error)); }
+    finally { setCalibrationBusy(false); }
+  };
+  const fitCalibration = async () => {
+    if (!window.confirm(`Confirm the recorded movement is ${profile.alias}'s normal movement before fitting this profile.`)) return;
+    setCalibrationBusy(true);
+    try {
+      await api(`/baseline/${profile.id}/fit`, "POST", { reviewed_normal: true });
+      await refreshBaseline();
+      setResult(null);
+    } catch (error) { onError(String(error)); }
+    finally { setCalibrationBusy(false); }
+  };
   let signal: { kind: SignalKind; title: string; detail: string } = {
     kind: "warning", title: "Checking movement", detail: "",
   };
   const logged = alertLog.length;
   const loggedNote = `${logged} alert${logged === 1 ? "" : "s"} logged.`;
-  if (preview && people > 1 && !verdict) {
+  const identityState = verdict?.identity_state ?? result?.identity_state;
+  if (identityState === 'mismatch') {
+    signal = { kind: "warning", title: "Person may not match", detail: "Movement analysis paused for this profile." };
+  } else if (identityState === 'checking' && !verdict) {
+    signal = { kind: "warning", title: "Checking person", detail: "Comparing with the reviewed profile." };
+  } else if (preview && people > 1 && !verdict) {
     signal = { kind: "warning", title: "One person only", detail: "Paused until one person remains." };
   } else if (concern === "on_floor" && (lost.current || result?.quality === "uncertain")) {
     // Out of clear view since the last reading on the floor: keep the alert, but say so.
@@ -527,6 +566,7 @@ export function Capture({
   // Triage follows the last alert: the one Gemini reviews for an upload.
   const latestAlert = alertLog.at(-1) ?? verdict?.event ?? null;
   const triage = <TriageProgress
+    identityState={identityState}
     event={latestAlert}
     candidateDecision={verdict?.candidate_decision ?? lastDecision}
     prediction={lastScored.current ?? result?.action_prediction}
@@ -624,6 +664,19 @@ export function Capture({
           />
         </label>
         {verdict && recordedFrames.current.length > 0 && <button className="secondary small" onClick={exportSkeleton}>Download movement data</button>}
+      </div>
+      <div className="calibration-controls">
+        <strong>Person check</strong>
+        <span>{baselineStatus?.evidence.identity_anchor ? "Reviewed body profile ready" : "Needs reviewed normal movement from two capture sessions"}</span>
+        <div className="action-row">
+          <button className="secondary small" disabled={!running || calibrationBusy || baselineStatus?.recording}
+            onClick={() => void setCalibration("start")}>Record normal movement</button>
+          <button className="secondary small" disabled={!baselineStatus?.recording || calibrationBusy}
+            onClick={() => void setCalibration("stop")}>Stop recording</button>
+          <button className="secondary small" disabled={!baselineStatus?.calibration_windows || baselineStatus.recording || calibrationBusy}
+            onClick={() => void fitCalibration()}>Fit reviewed profile</button>
+        </div>
+        {baselineStatus?.recording && <span>Recording normal movement. Capture a second session before fitting.</span>}
       </div>
       {fileName && <p className="capture-file">{fileName} · Video stays in this browser while movement is analyzed.</p>}
       </div>

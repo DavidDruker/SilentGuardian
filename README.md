@@ -4,7 +4,7 @@
 
 <h3 align="center">Privacy-first movement monitoring that tells a care team about a fall, and the unsteadiness before it, with the evidence to act. No video leaves the room.</h3>
 
-Hayvn watches movement, not people. A browser turns the camera (or a local video file) into a stick-figure skeleton, and only that skeleton is sent to the server. A three-stage check (rules, a learned action model, then Gemini) decides whether the movement is worth waking someone up for. Every alert carries the evidence behind it and stays open until a human acknowledges it.
+Hayvn turns camera or local-video frames into a stick-figure skeleton in the browser, and only that skeleton is sent to the server. A reviewed, per-profile body-shape check pauses clear mismatches. Then rules, a learned action model, and Gemini assess movement and decide whether to alert someone. Every alert carries the evidence behind it and stays open until a human acknowledges it.
 
 > Hayvn is an engineering prototype. It is not a medical device or an emergency service, and it makes no clinical claims.
 
@@ -35,7 +35,9 @@ Where each of these stands today (built, tested, deployed, or still to verify) i
 ```mermaid
 flowchart LR
     A[Camera or local video<br/>stays in the browser] --> B[MediaPipe pose<br/>skeleton only]
-    B --> C[1. Rules<br/>sensitive candidates]
+    B --> P[Person check<br/>reviewed skeleton proportions]
+    P -->|clear mismatch| X[Pause this profile's triage]
+    P --> C[1. Rules<br/>sensitive candidates]
     C -->|no hit| Z[(Coverage only)]
     C -->|candidate| D[2. ML gate<br/>ST-GCN++]
     D --> E{Decision policy}
@@ -51,6 +53,8 @@ flowchart LR
 ```
 
 **Capture.** MediaPipe Pose Landmarker runs in a Web Worker. Landmarks are smoothed, and tracking dropouts under half a second are bridged with the last good pose. Exactly one visible person is scored; a second person makes the frame uncertain and pauses scoring.
+
+**Person check.** The operator records ordinary movement in two capture sessions and confirms it belongs to the profile before fitting. The app stores median upright skeleton proportions for shoulders, hips, arms and legs. Each stream must provide several consistent readings before rules start. Several large, persistent differences pause its rules and exclude those frames from daily baseline learning. A match means the pose is consistent with the reviewed reference; similar-looking people and poor camera angles cannot be reliably distinguished. Older profiles need new reviewed calibration before this check and automatic learning are active.
 
 **1. Rules** ([`detector.py`](backend/app/detector.py)). Two-second windows are scored about three times a second. Rules are tuned for recall because later stages filter them: a possible *fall* (lying outside the bed zone after a hip drop above 0.35 torso lengths, or upright then lying within 3.5 seconds), *prolonged stillness* on the floor (30 seconds, urgent at 120), *stumble*, sustained *sway*, and contextual *restricted-hours standing* and *bed exit*. Each hit becomes a durable, idempotent candidate record.
 
@@ -74,7 +78,7 @@ flowchart LR
 ## What a care team sees
 
 - **Two modes.** *Care* opens a set of profile cards before capture; each has a grey default avatar. *Personal* is for one person, with an optional on-screen check-in before anyone is contacted.
-- **Triage progress** on every capture and alert shows which stage was reached (Rules, ML, Gemini) and why a stage was skipped.
+- **Triage progress** on every capture and alert shows the person check, Rules, ML and Gemini, including paused or skipped stages.
 - **Evidence with each alert:** the rule that fired, measured posture, trunk angle, visibility, the personal-baseline change score (when scored), the ML scores, and Gemini's summary when it ran.
 - **Acknowledge or False alarm** from the alert, or from a signed trusted-contact link that works without logging in (scoped to one event and one contact, expires after seven days).
 - **Per-profile privacy panel:** consent state, stored-row counts, pause, and permanent deletion with a receipt.
@@ -87,7 +91,7 @@ flowchart LR
 - Gemini is limited to one review per uploaded video, and alerts are deduplicated per rule within a five-second window.
 - Notification IDs are idempotent. Calls fire once per event, with a cooldown and daily limit, to an allowlisted number only. Provider delivery is at-least-once.
 - Production refuses to start without PostgreSQL, 32+ character secrets and an HTTPS `PUBLIC_URL` (plus a unique 32+ character internal token when the services are split). Sessions use signed cookies, state-changing requests and the pose WebSocket are origin-checked, requests are size-limited, and login is rate-limited.
-- A personal statistical baseline (per-posture median/MAD) updates daily from normal activity (80% previous, 20% new day), then deletes the processed pose windows. See [BASELINE.md](docs/BASELINE.md).
+- A personal statistical baseline (per-posture median/MAD) updates daily from normal activity that passed the person check (80% previous, 20% new day), then deletes the processed pose windows. See [BASELINE.md](docs/BASELINE.md).
 
 ## Architecture and stack
 

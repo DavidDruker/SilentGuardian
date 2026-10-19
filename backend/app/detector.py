@@ -95,11 +95,24 @@ def sample(frame: PoseFrame, profile: Profile, previous_posture=None):
     in_bed = bool(zone and zone.x1 <= hip[0] <= zone.x2 and zone.y1 <= hip[1] <= zone.y2)
     helper = False
     vector = [v for k in MODEL_KEYS for v in ((points[k].x - hip[0]) / torso, (points[k].y - hip[1]) / torso)]
+    # Ratios are dimensionless and stay in the skeleton-only data. Only an upright,
+    # well-visible body is suitable for a conservative person-consistency check.
+    identity = None
+    joints = (11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28)
+    identity_torso = math.dist(hip, shoulder)
+    if posture == 'standing' and identity_torso >= .08 and all(points[k].visibility >= .8 for k in joints):
+        distance = lambda a, b: math.dist((points[a].x, points[a].y), (points[b].x, points[b].y))
+        identity = {
+            'shoulders': distance(11, 12) / identity_torso,
+            'hips': distance(23, 24) / identity_torso,
+            'arms': (distance(11, 13) + distance(13, 15) + distance(12, 14) + distance(14, 16)) / (2 * identity_torso),
+            'legs': (distance(23, 25) + distance(25, 27) + distance(24, 26) + distance(26, 28)) / (2 * identity_torso),
+        }
     return dict(t=frame.timestamp, x=hip[0], y=hip[1], torso=torso, angle=angle,
                 posture=posture, quality=quality, in_bed=in_bed, helper=helper,
                 wrist=[(points[k].x, points[k].y) for k in (15, 16)],
                 ankles=[points[k].y for k in (27, 28)], vector=vector,
-                landmarks=[p.model_dump() for p in points])
+                landmarks=[p.model_dump() for p in points], identity=identity)
 
 
 def sequence(samples):

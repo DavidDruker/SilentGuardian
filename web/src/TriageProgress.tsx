@@ -13,6 +13,7 @@ export function TriageProgress({
   scoredWindows = 0,
   geminiBlocker,
   mlNote,
+  identityState,
 }: {
   event?: GuardianEvent | null;
   candidateDecision?: string | null;
@@ -23,10 +24,20 @@ export function TriageProgress({
   scoredWindows?: number;
   geminiBlocker?: string;
   mlNote?: string;
+  identityState?: string;
 }) {
+  const identity: Stage = identityState === 'matched'
+    ? { label: 'Person check', detail: 'Consistent with reviewed baseline', state: 'done' }
+    : identityState === 'mismatch'
+      ? { label: 'Person check', detail: 'Different body shape · paused', state: 'active' }
+      : identityState === 'checking'
+        ? { label: 'Person check', detail: 'Checking person', state: 'active' }
+        : { label: 'Person check', detail: 'Needs reviewed calibration', state: 'skipped' };
   const action = prediction ?? event?.action_prediction;
   const hasRuleHit = Boolean(event || candidateDecision || ruleHits.length || hasIncident);
-  const rule: Stage = hasRuleHit
+  const rule: Stage = (identityState === 'mismatch' || identityState === 'checking') && !hasRuleHit
+    ? { label: 'Rules', detail: 'Paused for person check', state: 'skipped' }
+    : hasRuleHit
     ? { label: "Rules", detail: "Flagged movement", state: "done" }
     : quality === "good" || scoredWindows > 0
       ? { label: "Rules", detail: "Checked", state: "done" }
@@ -71,8 +82,9 @@ export function TriageProgress({
     gemini = { label: "Gemini", detail: geminiBlocker ?? "Not requested", state: "skipped" };
   }
 
-  const stages = [rule, ml, gemini];
-  const reached = [...stages].reverse().find((stage) => stage.state !== "skipped")?.label ?? "Rules";
+  const stages = [identity, rule, ml, gemini];
+  const reached = identityState === 'mismatch' || identityState === 'checking' ? identity.label
+    : [...stages].reverse().find((stage) => stage.state !== "skipped")?.label ?? "Rules";
   return <section className="triage-progress" aria-label="Triage progress">
     <div className="triage-heading"><strong>Triage progress</strong><span>Reached: {reached}</span></div>
     <ol className="triage-steps">

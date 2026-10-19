@@ -1844,3 +1844,6 @@ legend {
     font-size: 30px;
   }
 }
+.calibration-controls { display: grid; gap: 6px; margin-top: 12px; font-size: 12px; color: var(--muted, #64748b); }
+.calibration-controls strong { color: var(--text, #172033); }
+.calibration-controls .action-row { display: flex; flex-wrap: wrap; gap: 6px; }

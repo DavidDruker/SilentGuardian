@@ -2031,6 +2031,11 @@
             "title": "Baseline State",
             "default": "uncalibrated"
           },
+          "identity_state": {
+            "type": "string",
+            "title": "Identity State",
+            "default": "not_enrolled"
+          },
           "action_prediction": {
             "anyOf": [
               {

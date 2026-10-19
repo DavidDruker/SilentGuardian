@@ -6,8 +6,9 @@ import pytest
 from sqlalchemy import select
 
 from backend.app.baseline import (FEATURES, blend_statistics, completed_day_cutoff,
-                                  fit_statistics, score_statistics, independent_records)
-from backend.app.db import Audit, CoverageHour, Event, PersonalBaseline, Window
+                                  fit_statistics, score_statistics, independent_records,
+                                  identity_disagrees, fit_identity)
+from backend.app.db import Audit, CoverageHour, Event, PersonalBaseline, Stream, Window
 from backend.app.gemini import GeminiWorker, event_package
 from backend.app.notifications import NotificationWorker
 from backend.app.replay import scenario_frames
@@ -17,6 +18,9 @@ from scripts.evaluate_baseline import validation_report
 
 def features(value=0):
     return {**{name: value for name in FEATURES}, 'posture': 'standing'}
+
+
+IDENTITY = {'shoulders': .52, 'hips': .41, 'arms': 1.04, 'legs': 1.4}
 
 
 def stats():
@@ -35,20 +39,72 @@ def test_robust_statistics_ignore_overlap_and_resist_outlier():
     assert score_statistics(fitted, {**features(), 'posture': 'lying'}) == (None, [])
 
 
+def test_identity_requires_independent_reviewed_shape_and_multiple_clear_differences():
+    records = [{'session': 'reviewed', 'timestamp': i*2.,
+                'features': {'identity_signature': IDENTITY}} for i in range(25)]
+    assert fit_identity(records) == IDENTITY
+    assert not identity_disagrees(IDENTITY, {**IDENTITY, 'shoulders': 1.2})
+    assert identity_disagrees(IDENTITY, {key: value*1.6 for key, value in IDENTITY.items()})
+
+
+def test_person_check_pauses_mismatched_stream_before_rules_or_learning(guardian):
+    from backend.app.detector import sample
+    normal = list(scenario_frames('normal', 'daniel'))
+    signature = sample(normal[0], next(p for p in guardian.profiles() if p.id == 'daniel'))['identity']
+    model = stats()
+    with guardian.db.sessions.begin() as s:
+        s.add(PersonalBaseline(person_id='daniel', anchor=model, current=model,
+            threshold=3.5, trigger_enabled=False, updated_at=guardian.clock(),
+            evidence={'identity_anchor': signature, 'identity_current': signature}))
+    # Uniform scaling is camera distance, so it must NOT imply another person.
+    scaled = []
+    for frame in normal[:15]:
+        landmarks = frame.poses[0].landmarks
+        changed = [point.model_copy(update={'x': .5 + (point.x-.5)*1.7,
+                                             'y': .55 + (point.y-.55)*1.7})
+                   for point in landmarks]
+        scaled.append(frame.model_copy(update={'poses': [Pose(track_id='subject', landmarks=changed)]}))
+    assert [guardian.ingest(frame).identity_state for frame in scaled][-1] == 'matched'
+    # Widths and leg length change relative to the torso, persistently.
+    different = []
+    for frame in normal[15:40]:
+        changed = []
+        for i, point in enumerate(frame.poses[0].landmarks):
+            x = .5 + (point.x-.5)*1.8 if i in (11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28) else point.x
+            y = .55 + (point.y-.55)*1.7 if i in (25, 26, 27, 28) else point.y
+            changed.append(point.model_copy(update={'x': x, 'y': y}))
+        different.append(frame.model_copy(update={'poses': [Pose(track_id='subject', landmarks=changed)]}))
+    results = [guardian.ingest(frame) for frame in different]
+    assert results[-1].identity_state == 'mismatch'
+    assert results[-1].quality == 'identity_mismatch'
+    assert not guardian.events()
+    with guardian.db.sessions() as s:
+        stream_id = f'daniel:synthetic-demo:{normal[0].session_id}'
+        assert s.get(Stream, stream_id).state['identity_state'] == 'mismatch'
+        assert not list(s.scalars(select(Window).where(Window.person_id == 'daniel',
+                                                 Window.features['identity_state'].as_string() == 'mismatch')))
+
+
 def test_baseline_requires_three_continuous_windows_and_keeps_rules(guardian):
+    from backend.app.detector import sample
     model = stats()
     model['standing']['sway']['median'] = .5
+    frames = list(scenario_frames('normal', 'daniel'))
+    identity = sample(frames[0], next(p for p in guardian.profiles() if p.id == 'daniel'))['identity']
     with guardian.db.sessions.begin() as session:
         session.add(PersonalBaseline(person_id='daniel', anchor=model, current=model, threshold=3.5,
-                                     trigger_enabled=True, evidence={'test_only': True}, updated_at=guardian.clock()))
-    frames = list(scenario_frames('normal', 'daniel'))
+                                     trigger_enabled=True, evidence={'test_only': True,
+                                         'identity_anchor': identity, 'identity_current': identity},
+                                     updated_at=guardian.clock()))
     results = [guardian.ingest(f) for f in frames[:40]]
     assert not guardian.events()
-    third = guardian.ingest(frames[40])
+    third = next((result for frame in frames[40:60]
+                  if (result := guardian.ingest(frame)).rule_hits), None)
+    assert third is not None
     assert third.rule_hits == ['personal_baseline']
     assert third.baseline_contributions[0]['feature'] == 'sway'
     assert guardian.events()[0].floor_urgency == 1
-    later = frames[45].model_copy(update={'session_id': 'new-baseline-session'})
+    later = frames[70].model_copy(update={'session_id': 'new-baseline-session'})
     assert guardian.ingest(later).rule_hits == []
     # A fixed fall still has its minimum concern floor regardless of baseline state.
     for f in scenario_frames('fall', 'daniel'):
@@ -63,11 +119,13 @@ def test_daily_update_blends_previous_baseline_deletes_windows_and_keeps_events(
     profile = next(p for p in guardian.profiles() if p.id == 'daniel')
     with guardian.db.sessions.begin() as s:
         s.add(PersonalBaseline(person_id='daniel', anchor=model, current=model, threshold=3.5, trigger_enabled=True,
-                               evidence={}, updated_at=clock()))
+                               evidence={'identity_anchor': IDENTITY, 'identity_current': IDENTITY}, updated_at=clock()))
         for i in range(70):
             eligible = i < 35
             s.add(Window(ts=datetime.fromtimestamp(old-150+i*2, timezone.utc), stream_id='observed',
-                         person_id='daniel', quality=1, features={**features(.02 if eligible else 9), 'baseline_eligible': eligible},
+                         person_id='daniel', quality=1, features={**features(.02 if eligible else 9),
+                             'baseline_eligible': eligible, 'identity_state': 'matched' if eligible else 'mismatch',
+                             'identity_signature': {key: value*1.1 for key, value in IDENTITY.items()}},
                          rule_hits=[] if eligible else ['fall'], calibration=False, sequence=None))
         s.add(Window(ts=datetime.fromtimestamp(cutoff.timestamp()+60, timezone.utc), stream_id='today',
                      person_id='daniel', quality=1, features={**features(.5), 'baseline_eligible': True},
@@ -86,6 +144,8 @@ def test_daily_update_blends_previous_baseline_deletes_windows_and_keeps_events(
         b = s.get(PersonalBaseline, 'daniel')
         assert b.anchor['standing']['sway']['median'] == 0
         assert b.current['standing']['sway']['median'] == pytest.approx(.004)
+        assert b.evidence['identity_anchor'] == IDENTITY
+        assert b.evidence['identity_current']['shoulders'] == pytest.approx(IDENTITY['shoulders']*1.02)
         assert b.trigger_enabled
         assert s.get(Event, 'event-kept').summary == 'Stored event'
         assert {w.stream_id for w in s.scalars(select(Window))} == {'today', 'synthetic-trend:daniel'}
@@ -109,14 +169,16 @@ def test_reviewed_calibration_fits_and_preserves_first_anchor(client, clock):
     with g.db.sessions.begin() as s:
         for i in range(64):
             s.add(Window(ts=datetime.fromtimestamp(clock()-i*2, timezone.utc), stream_id=f'camera-session-{i//32}',
-                         person_id='daniel', quality=1, features=features(.02), rule_hits=[], calibration=True, sequence=None))
+                         person_id='daniel', quality=1, features={**features(.02), 'identity_signature': IDENTITY},
+                         rule_hits=[], calibration=True, sequence=None))
     fitted = client.post('/api/baseline/daniel/fit', json={'reviewed_normal':True})
     assert fitted.status_code == 200 and fitted.json()['anchor_frozen']
     with g.db.sessions.begin() as s:
         assert not list(s.scalars(select(Window).where(Window.calibration == True)))
         for i in range(64):
             s.add(Window(ts=datetime.fromtimestamp(clock()-500-i*2, timezone.utc), stream_id=f'recalibration-{i//32}',
-                         person_id='daniel', quality=1, features=features(.04), rule_hits=[], calibration=True, sequence=None))
+                         person_id='daniel', quality=1, features={**features(.04), 'identity_signature': IDENTITY},
+                         rule_hits=[], calibration=True, sequence=None))
     assert client.post('/api/baseline/daniel/fit', json={'reviewed_normal':True}).status_code == 200
     b = client.get('/api/baseline/daniel').json()
     assert b['anchor']['standing']['sway']['median'] == .02

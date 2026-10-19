@@ -12,6 +12,29 @@ from .db import CoverageHour, PersonalBaseline, Window
 # Floors regularize zero/near-zero MAD at the sensor's practical resolution.
 FEATURES = {'sway': .01, 'hip_speed': .03, 'trunk_angle': 2.,
             'motion_energy': .04, 'wrist_speed': .08, 'ankle_change': .08}
+IDENTITY_FEATURES = ('shoulders', 'hips', 'arms', 'legs')
+
+
+def fit_identity(records, minimum=20):
+    """Fit reviewed upright body ratios from independent windows."""
+    values = defaultdict(list)
+    for row in independent_records(records):
+        signature = row['features'].get('identity_signature')
+        if isinstance(signature, dict) and all(isinstance(signature.get(k), (int, float))
+                                               and signature[k] > 0 for k in IDENTITY_FEATURES):
+            for key in IDENTITY_FEATURES:
+                values[key].append(signature[key])
+    if any(len(values[key]) < minimum for key in IDENTITY_FEATURES):
+        return {}
+    return {key: median(values[key]) for key in IDENTITY_FEATURES}
+
+
+def identity_disagrees(reference, observed):
+    """Only several large, simultaneous differences count as a clear mismatch."""
+    if not reference or not observed:
+        return False
+    return sum(abs(observed[key] / reference[key] - 1) > .4
+               for key in IDENTITY_FEATURES) >= 3
 
 
 def independent_records(records):
@@ -114,23 +137,52 @@ class BaselineEngine:
                 'flag': bool(baseline.trigger_enabled and score is not None and score > baseline.threshold),
                 'threshold': baseline.threshold}
 
+    def identity(self, session, person_id, signature, state, timestamp):
+        baseline = session.get(PersonalBaseline, person_id)
+        reference = baseline.evidence.get('identity_anchor') if baseline else None
+        current = (baseline.evidence.get('identity_current') or reference) if baseline else None
+        if not reference:
+            return 'not_enrolled'
+        if signature is None:
+            return state.get('identity_state', 'checking')
+        mismatch = identity_disagrees(reference, signature) and identity_disagrees(current, signature)
+        key = 'identity_bad' if mismatch else 'identity_good'
+        other = 'identity_good' if mismatch else 'identity_bad'
+        # Count independent readings rather than adjacent camera frames.
+        if state.get('identity_sample_at') is None or timestamp - state['identity_sample_at'] >= .25:
+            state[key] = state.get(key, 0) + 1
+            state[other] = 0
+            state['identity_sample_at'] = timestamp
+        if state[key] >= 3:
+            state['identity_state'] = 'mismatch' if mismatch else 'matched'
+            if not mismatch:
+                state['identity_last_match_at'] = timestamp
+        elif state.get('identity_state') in ('matched', 'mismatch'):
+            state['identity_state'] = 'checking'
+        return state.get('identity_state', 'checking')
+
     def calibrate(self, person_id, now):
         with self.db.lock, self.db.sessions.begin() as session:
             rows = list(session.scalars(select(Window).where(Window.person_id == person_id, Window.calibration == True).order_by(Window.ts)))
             records = window_records(rows)
             stats = fit_statistics(records)
+            identity = fit_identity(records)
             if not stats or len({r['session'] for r in records}) < 2:
                 raise ValueError('Need two reviewed normal sessions and at least 30 non-overlapping two-second windows per supported posture.')
+            if not identity:
+                raise ValueError('Need at least 20 clear, upright identity samples in the reviewed calibration recordings.')
             existing = session.get(PersonalBaseline, person_id)
             if existing:
                 existing.current, existing.updated_at = stats, now
                 existing.trigger_enabled = False
-                existing.evidence = {**existing.evidence, 'current_recalibrated': now, 'validation': None,
+                existing.evidence = {**existing.evidence, 'identity_anchor': existing.evidence.get('identity_anchor', identity),
+                                     'identity_current': identity, 'current_recalibrated': now, 'validation': None,
                                      'current_sessions': sorted({r['session'] for r in records})}
             else:
                 session.add(PersonalBaseline(person_id=person_id, anchor=stats, current=stats,
                     threshold=3.5, trigger_enabled=False, updated_at=now,
                     evidence={'anchor_created': now, 'reviewed_normal': True, 'validation': None,
+                              'identity_anchor': identity, 'identity_current': identity,
                               'anchor_sessions': sorted({r['session'] for r in records}),
                               'current_sessions': sorted({r['session'] for r in records})}))
             # The fitted statistics are enough for operation. Do not keep the raw
@@ -164,12 +216,19 @@ class BaselineEngine:
                 grouped[(row.person_id, observed.astimezone(local_zone).date())].append(row)
             for (person_id, day), person_rows in sorted(grouped.items(), key=lambda item: item[0][1]):
                 baseline = session.get(PersonalBaseline, person_id)
-                eligible = [row for row in person_rows if row.features.get('baseline_eligible')]
+                eligible = [row for row in person_rows if row.features.get('baseline_eligible')
+                            and row.features.get('identity_state') == 'matched']
                 records = window_records(eligible)
                 stats = fit_statistics(records) if baseline else {}
                 if stats:
                     baseline.current = blend_statistics(baseline.current, stats, previous_weight)
                     baseline.updated_at = now
+                    daily_identity = fit_identity(records)
+                    previous_identity = baseline.evidence.get('identity_current')
+                    if daily_identity and previous_identity:
+                        baseline.evidence = {**baseline.evidence, 'identity_current': {
+                            key: previous_weight * previous_identity[key] + (1-previous_weight) * daily_identity[key]
+                            for key in IDENTITY_FEATURES}}
                     baseline.evidence = {
                         **baseline.evidence,
                         'last_daily_update': now,
